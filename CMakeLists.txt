@@ -10,6 +10,11 @@ SET(CMAKE_CXX_FLAGS "-O2 -fPIC -fpermissive")
 
 #add_definitions(-fPIC)
 
+find_library(ALSA_LIB asound)
+if(NOT ALSA_LIB)
+  message(FATAL_ERROR "ALSA library not found")
+endif()
+
 # get all python files excluding Mocks
 #file(GLOB PYTHON_FILES *.py)
 #list(FILTER PYTHON_FILES EXCLUDE REGEX ".*Mock.*")
@@ -22,5 +27,10 @@ SET(CMAKE_CXX_FLAGS "-O2 -fPIC -fpermissive")
 
 message(${CMAKE_BINARY_DIR})
 
-add_library(DxO plugin.cpp)
-target_link_libraries(DxO libsound2)
+add_library(DxO SHARED plugin.cpp)
+#add_executable(DxO plugin.cpp)
+set_target_properties(DxO PROPERTIES VERSION "1.0.0")
+#set_target_properties(DxO PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR})
+target_link_libraries(DxO asound dl)
+
+install(TARGETS DxO DESTINATION /usr/lib/alsa)

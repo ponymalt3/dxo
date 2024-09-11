@@ -276,3 +276,8 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
 SND_PCM_PLUGIN_SYMBOL(dxo);
 
 }
+
+int main()
+{
+  return 0;
+}
