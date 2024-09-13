@@ -5,7 +5,7 @@
  *      Author: malte
  */
 
-  #include <fftw3.h>
+  #include "fftw3.h"
 
 #define PIC
 
