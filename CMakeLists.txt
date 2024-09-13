@@ -15,11 +15,6 @@ if(NOT ALSA_LIB)
   message(FATAL_ERROR "ALSA library not found")
 endif()
 
-find_library(FFTW3F_LIB fftw3)
-if(NOT FFTW3_LIB)
-  message(FATAL_ERROR "FFTW3 library not found")
-endif()
-
 # get all python files excluding Mocks
 #file(GLOB PYTHON_FILES *.py)
 #list(FILTER PYTHON_FILES EXCLUDE REGEX ".*Mock.*")
@@ -33,6 +28,7 @@ message(${CMAKE_BINARY_DIR})
 add_executable(DxO plugin.cpp)
 set_target_properties(DxO PROPERTIES VERSION ${PROJECT_VERSION})
 set_target_properties(DxO PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR})
-target_link_libraries(DxO asound dl fftw3f)
+target_link_directories(DxO PUBLIC .)
+target_link_libraries(DxO asound dl libfftw3f.a)
 
 install(TARGETS DxO DESTINATION /usr/lib/alsa)
