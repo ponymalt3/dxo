@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.27)
 
 project(DxO VERSION 1.0.0)
 
@@ -12,7 +12,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
-SET(CMAKE_CXX_FLAGS "-O2 -fPIC -fpermissive")
+SET(CMAKE_CXX_FLAGS "-g -O0 -fPIC -fpermissive")
+
+# -O3 -mcpu=armv7-a -ftree-vectorize -mfloat-abi=hard -mfpu=neon-vfpv4
 
 # SET(CMAKE_C_FLAGS "-O2 -fPIC")
 
@@ -59,12 +61,14 @@ install(TARGETS DxO DESTINATION /)
 
 # Unit Tests
 enable_testing()
-add_executable(Testing tests.cpp tasks/test.cpp)
-target_link_libraries(Testing gtest_main asound)
-add_test(NAME example_test COMMAND Testing)
+add_executable(TestingX tests.cpp tasks/test.cpp filter/test.cpp)
+add_dependencies(TestingX DxO)
+target_link_directories(TestingX PUBLIC fftw3f/lib)
+target_link_libraries(TestingX gtest_main asound libfftw3f.a)
 
+add_test(NAME example_test COMMAND Testing)
 add_custom_command(
-  TARGET Testing POST_BUILD
-  COMMAND Testing --gtest_output=xml:Testing.xml
+  TARGET TestingX POST_BUILD
+  COMMAND TestingX --gtest_output=xml:Testing.xml
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
