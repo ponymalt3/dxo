@@ -13,14 +13,16 @@
 
 class Artifact
 {
+public:
+  virtual ~Artifact() {}
 };
 
-template <typename T> class ArtifactData : public Artifact
+template <typename T>
+class ArtifactImpl : public Artifact
 {
 public:
-  template <typename... Args> ArtifactData(Args... args) : data_(std::forward<Args>(args)...) {}
-
-  T &getData() { return data_; }
+  ArtifactImpl(T&& data) : data_(std::move(data)) {}
+  T& getData() { return data_; }
 
 protected:
   T data_;
@@ -29,13 +31,13 @@ protected:
 class Task : public std::enable_shared_from_this<Task>, public ThreadSafeList::Node
 {
 public:
-  void execute(const std::function<void(std::shared_ptr<Task>)> &dep_resolved)
+  void execute(const std::function<void(std::shared_ptr<Task>)>& dep_resolved)
   {
-    callback_(*this); // Execute the task
+    callback_(*this);  // Execute the task
 
-    for (auto &d : dependents_)
+    for(auto& d : dependents_)
     {
-      if (--(d->dependenciesLeft_) == 0)
+      if(--(d->dependenciesLeft_) == 0)
       {
         dep_resolved(d);
       }
@@ -45,20 +47,25 @@ public:
     dependenciesLeft_ = dependencies_.size();
   }
 
-  const std::vector<std::shared_ptr<Task>> &getDependencies() const { return dependencies_; }
+  const std::vector<std::shared_ptr<Task>>& getDependencies() const { return dependencies_; }
 
-  template <typename T> T &getArtifact() { return reinterpret_cast<ArtifactData<T> *>(artifact_.get())->getData(); }
+  template <typename T>
+  T& getArtifact()
+  {
+    return static_cast<ArtifactImpl<T>*>(artifact_.get())->getData();
+  }
 
   bool isFinal() const { return dependents_.size() == 0; }
 
   template <typename ArtifactType>
-  static std::shared_ptr<Task>
-  create(const std::function<void(Task &)> &callback, const std::vector<std::shared_ptr<Task>> &dependencies = {},
-         std::unique_ptr<Artifact> artifact = std::make_unique<ArtifactData<ArtifactType>>())
+  static std::shared_ptr<Task> create(const std::function<void(Task&)>& callback,
+                                      const std::vector<std::shared_ptr<Task>>& dependencies = {},
+                                      ArtifactType&& artifact = ArtifactType())
   {
-    std::shared_ptr<Task> task{new Task(callback, dependencies, std::move(artifact))};
+    std::shared_ptr<Task> task{
+        new Task(callback, dependencies, std::make_unique<ArtifactImpl<ArtifactType>>(std::move(artifact)))};
 
-    for (auto &d : dependencies)
+    for(auto& d : dependencies)
     {
       d->dependents_.push_back(task);
     }
@@ -66,25 +73,29 @@ public:
     return task;
   }
 
-  static std::shared_ptr<Task> fromNode(ThreadSafeList::Node *node)
+  static std::shared_ptr<Task> fromNode(ThreadSafeList::Node* node)
   {
-    return static_cast<Task *>(node)->getSharedPointer();
+    return static_cast<Task*>(node)->getSharedPointer();
   }
 
-protected:
-  Task(std::function<void(Task &)> task, const std::vector<std::shared_ptr<Task>> &dependencies,
+  // protected:
+  Task(std::function<void(Task&)> task,
+       const std::vector<std::shared_ptr<Task>>& dependencies,
        std::unique_ptr<Artifact> artifact)
-      : callback_(std::move(task)), dependencies_(dependencies), dependenciesLeft_(dependencies.size()), dependents_{},
+      : callback_(std::move(task)),
+        dependencies_(dependencies),
+        dependenciesLeft_(dependencies.size()),
+        dependents_{},
         artifact_(std::move(artifact))
   {
   }
 
   std::shared_ptr<Task> getSharedPointer() { return shared_from_this(); }
 
-  std::function<void(Task &)> callback_;
+  std::function<void(Task&)> callback_;
   std::vector<std::shared_ptr<Task>> dependencies_;
-  std::atomic<uint32_t> dependenciesLeft_{0};     // Number of dependencies yet to complete
-  std::vector<std::shared_ptr<Task>> dependents_; // Tasks that depend on this one
+  std::atomic<uint32_t> dependenciesLeft_{0};      // Number of dependencies yet to complete
+  std::vector<std::shared_ptr<Task>> dependents_;  // Tasks that depend on this one
   std::unique_ptr<Artifact> artifact_{nullptr};
 };
 
@@ -93,7 +104,7 @@ class TaskRunner
 public:
   explicit TaskRunner(uint32_t numThreads)
   {
-    for (uint32_t i = 0; i < numThreads; ++i)
+    for(uint32_t i = 0; i < numThreads; ++i)
     {
       workers_.emplace_back([this] { threadRun(false); });
     }
@@ -101,50 +112,47 @@ public:
 
   ~TaskRunner()
   {
-    stop_.store(true); // Signal threads to stop
+    stop_.store(true);  // Signal threads to stop
     {
       std::unique_lock lock(mutex_);
       state_ = 0xFFFFFFFF;
     }
     cv_.notify_all();
 
-    for (auto &worker : workers_)
+    for(auto& worker : workers_)
     {
-      if (worker.joinable())
+      if(worker.joinable())
       {
         worker.join();
       }
     }
   }
 
-  bool run(const std::vector<std::shared_ptr<Task>> &tasks)
+  bool run(const std::vector<std::shared_ptr<Task>>& tasks, bool wait = true)
   {
     std::shared_ptr<Task> finalTask{nullptr};
 
-    for (auto &task : tasks)
+    for(auto& task : tasks)
     {
-      if (task->isFinal())
+      if(task->isFinal())
       {
-        if (finalTask)
-        {
-          std::cout << "errr" << std::endl;
-          return false;
-        }
-
-        finalTask = task;
+        finalTask_ = task;
       }
 
-      if (task->getDependencies().size() == 0)
+      if(task->getDependencies().size() == 0)
       {
         activeTasks_.push(task.get());
       }
     }
 
     incrementState();
-    threadRun(true);
-
-    finalTaskReady_.acquire();
-    finalTask->execute([](std::shared_ptr<Task>) {});
+    if(finalTask_ && wait)
+    {
+      threadRun(true);
+      finalTaskReady_.acquire();
+      finalTask_->execute(nullptr);  //[](std::shared_ptr<Task>) {});
+      finalTask_ = nullptr;
+    }
 
     return true;
   }
@@ -159,10 +167,11 @@ protected:
     cv_.notify_all();
   }
 
-  void waitFor(uint32_t state)
+  uint32_t waitFor(uint32_t state)
   {
     std::unique_lock lock(mutex_);
     cv_.wait(lock, [this, state] { return state_ >= state; });
+    return state_;
   }
 
   void threadRun(bool master)
@@ -170,40 +179,38 @@ protected:
     uint64_t state{1};
 
     waitFor(state);
-    while (!stop_.load())
+    while(!stop_.load())
     {
       auto task = activeTasks_.pop();
 
-      if (task == nullptr)
+      if(task == nullptr)
       {
-        if (master)
+        if(master)
         {
           return;
         }
 
-        std::cout << "Sleeping..." << std::endl;
-        waitFor(++state);
+        // std::cout << "Sleeping..." << std::endl;
+        state = waitFor(++state);
       }
       else
       {
         bool restartWorker = false;
-        Task::fromNode(task)->execute(
-            [this, &restartWorker](std::shared_ptr<Task> task)
+        Task::fromNode(task)->execute([this, &restartWorker](std::shared_ptr<Task> task) {
+          if(!task->isFinal())
+          {
+            if(activeTasks_.push(task.get()))
             {
-              if (!task->isFinal())
-              {
-                if (activeTasks_.push(task.get()))
-                {
-                  restartWorker = true;
-                }
-              }
-              else
-              {
-                finalTaskReady_.release();
-              }
-            });
+              restartWorker = true;
+            }
+          }
+          else
+          {
+            finalTaskReady_.release();
+          }
+        });
 
-        if (restartWorker)
+        if(restartWorker)
         {
           // restart worker
           incrementState();
@@ -219,4 +226,5 @@ protected:
   std::vector<std::thread> workers_;
   std::atomic<bool> stop_{false};
   std::binary_semaphore finalTaskReady_{0};
+  std::shared_ptr<Task> finalTask_{nullptr};
 };
