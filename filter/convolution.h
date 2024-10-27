@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <complex>
 #include <iostream>
 #include <list>
@@ -76,18 +77,24 @@ static void add(std::complex<float>* result,
 class Convolution
 {
 public:
-  Convolution(const RealData& h, uint32_t subFilterSize) : Convolution(h, subFilterSize, subFilterSize) {}
-  Convolution(const RealData& h, uint32_t subFilterSize, uint32_t inputBlockSize)
+  Convolution(const RealData& h, uint32_t inputBlockSize)
+      : Convolution(
+            h,
+            inputBlockSize,
+            (1 << static_cast<uint32_t>(std::ceil(std::log2(inputBlockSize) + 1))) - inputBlockSize + 1)
+  {
+  }
+  Convolution(const RealData& h, uint32_t inputBlockSize, uint32_t subFilterSize)
       : subFilterSize_{subFilterSize},
-        inputBlockSize_{inputBlockSize},
-        fftSize_{inputBlockSize_ + subFilterSize_ - 1},
+        fftSize_{inputBlockSize + subFilterSize_ - 1},
         forwardFft_{fftSize_},
         inverseFft_{fftSize_}
   {
+    std::cout << "fft: " << (fftSize_) << std::endl;
     blockSize_ = forwardFft_.output_.size();
-    numBlocks_ = h.size() / subFilterSize;
-    assert(numBlocks > 1 && "must be more than one block");
-    assert(numBlocks_ * subFilterSize == h.size() && "length(h) must be multiple of subFilterSize ");
+    numBlocks_ = (h.size() + subFilterSize_ - 1) / subFilterSize_;
+    assert(numBlocks_ > 1 && "must be more than one block");
+    assert(subFilterSize_ >= inputBlockSize && "subFilterSize must be greater than inputBlockSize");
     H_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
     delayLine_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
     XX_ = new(std::align_val_t(64)) float[subFilterSize_];
@@ -106,7 +113,14 @@ public:
     {
       for(auto& f : fft.input_.subspan(0, subFilterSize_))
       {
-        f = *(src++);
+        if(src < h.data() + h.size())
+        {
+          f = *(src++) / fftSize_;
+        }
+        else  // pad length(h) to be multiple of subFilterSize
+        {
+          f = 0.0f;
+        }
       }
 
       for(auto& f : fft.input_.subspan(subFilterSize_))
@@ -116,13 +130,13 @@ public:
 
       fft.run();
 
-      std::cout << "H[" << (i) << "]:\n";
+      // std::cout << "H[" << (i) << "]:\n";
       for(auto f : fft.output_)
       {
         *(dst++) = f;
-        std::cout << f << " ";
+        // std::cout << (f) << " ";
       }
-      std::cout << std::endl;
+      // std::cout << std::endl;
     }
   }
 
@@ -141,20 +155,20 @@ public:
           auto x = forwardFft_.input_.last(subFilterSize_ - 1);
           memcpy(XX_, x.data(), x.size() * sizeof(float));
 
-          std::cout << "Input size: " << (forwardFft_.input_.size()) << std::endl;
+          /*std::cout << "Input size: " << (forwardFft_.input_.size()) << std::endl;
           for(auto& i : forwardFft_.input_)
           {
             std::cout << (i) << " ";
           }
-          std::cout << std::endl;
+          std::cout << std::endl;*/
           forwardFft_.run();
 
-          std::cout << "resul: " << std::endl;
+          /*std::cout << "resul: " << std::endl;
           for(auto& i : task.getArtifact<ComplexData>())
           {
             std::cout << (i) << " ";
           }
-          std::cout << std::endl;
+          std::cout << std::endl;*/
         },
         {},
         forwardFft_.output_.subspan(0));
@@ -175,94 +189,107 @@ public:
       deps.push_back(Task::create<ComplexVec>(
           [this, i, combineBlocks](Task& task) {
             multiplyAddBlocks(i, task.getArtifact<ComplexVec>(), combineBlocks);
-            std::cout << "sum: \n";
-            for(auto& x : task.getArtifact<ComplexVec>())
-            {
-              std::cout << (x) << " ";
-            }
-            std::cout << std::endl;
           },
           {rootTask},
           ComplexVec(blockSize_)));
     }
-
-    std::cout << "complete 1" << std::endl;
 
     // move block
     auto shift = Task::create<ComplexData>(
         [this](Task& task) { pushDataBlock(task.getDependencies()[0]->getArtifact<ComplexData>().data()); },
         deps);
 
-    std::cout << "deps: " << (deps.size()) << std::endl;
+    // std::cout << "deps: " << (deps.size()) << std::endl;
 
     std::list<TaskType> sumUpTasks{deps.begin() + 1, deps.end()};
-    std::cout << "sumUpTasks: " << (sumUpTasks.size()) << std::endl;
+    // std::cout << "sumUpTasks: " << (sumUpTasks.size()) << std::endl;
 
     while(sumUpTasks.size() > 1)
     {
       uint32_t numDeps = std::min<uint32_t>(std::max<uint32_t>(2, combineBlocks), sumUpTasks.size());
-      std::cout << "  numDeps: " << (numDeps) << std::endl;
+      // std::cout << "  numDeps: " << (numDeps) << std::endl;
 
       std::vector<TaskType> deps;
       for(uint32_t i{0}; i < numDeps; ++i)
       {
         deps.push_back(sumUpTasks.front());
         sumUpTasks.pop_front();
-        std::cout << "  pop " << std::endl;
+        // std::cout << "  pop " << std::endl;
       }
 
       sumUpTasks.push_back(Task::create<ComplexVec>(
           [this](Task& task) {
             sumBlocks(task.getArtifact<ComplexVec>(), task.getDependencies());
-            std::cout << "sumUP: \n";
+            /*std::cout << "sumUP: \n";
             for(auto& x : task.getArtifact<ComplexVec>())
             {
               std::cout << (x) << " ";
             }
-            std::cout << std::endl;
+            std::cout << std::endl;*/
           },
           deps,
           ComplexVec(blockSize_)));
-      std::cout << "  push " << std::endl;
+      // std::cout << "  push " << std::endl;
     }
 
-    std::cout << "complete 3" << std::endl;
+    // std::cout << "complete 3" << std::endl;
 
     auto combine = Task::create<ComplexData>(
         [this](Task& task) {
-          std::cout << "combine:" << std::endl;
+          // std::cout << "Combine:" << std::endl;
           auto result = task.getArtifact<ComplexData>().data();
-          multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexVec>().data(), blockSize_);
-          // add(result, result, task.getDependencies()[1]->getArtifact<ComplexVec>().data(), blockSize_);
+
+          /*std::cout << "\n  input: ";
+          for(auto& x : task.getDependencies()[0]->getArtifact<ComplexData>())
+          {
+            std::cout << (x) << " ";
+          }
+          std::cout << "\n  h: ";
+          for(auto& x : std::span(H_, blockSize_))
+          {
+            std::cout << (x) << " ";
+          }*/
+
+          multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
+
+          /*std::cout << "\n  multipy: ";
           for(auto& x : task.getArtifact<ComplexData>())
           {
             std::cout << (x) << " ";
           }
-          std::cout << std::endl;
-          // std::cout << "dependents_\n";
-          for(auto& x : task.dependents_)
+          std::cout << "\n  add: ";
+          for(auto& x : task.getDependencies()[1]->getArtifact<ComplexVec>())
           {
-            // std::cout << "dependent: " << x->dependenciesLeft_ << std::endl;
+            std::cout << (x) << " ";
+          }*/
+
+          add(result, result, task.getDependencies()[1]->getArtifact<ComplexVec>().data(), blockSize_);
+
+          /*std::cout << "\n  result: ";
+          for(auto& x : task.getArtifact<ComplexData>())
+          {
+            std::cout << (x) << " ";
           }
+          std::cout << std::endl;*/
         },
-        {input},  //, sumUpTasks.front()},
+        {input, sumUpTasks.front()},
         inverseFft_.input_.subspan(0));
 
     auto resultTask = Task::create<RealData>(
         [this](Task& task) {
-          std::cout << "inverse input:\n";
+          /*std::cout << "inverse input:\n";
           for(auto& x : inverseFft_.input_)
           {
             std::cout << (x) << " ";
           }
-          std::cout << std::endl;
+          std::cout << std::endl;*/
           inverseFft_.run();
-          std::cout << "inverse output:\n";
+          /*std::cout << "inverse output:\n";
           for(auto& x : inverseFft_.output_)
           {
             std::cout << (x) << " ";
           }
-          std::cout << std::endl;
+          std::cout << std::endl;*/
         },
         {combine, shift},
         inverseFft_.output_.subspan(subFilterSize_ - 1));
@@ -273,7 +300,25 @@ public:
 protected:
   void multiplyAddBlocks(uint32_t index, ComplexVec& result, uint32_t numBlocks = 1) const
   {
+    /*std::cout << "Multiply Add:\n  input: ";
+    for(auto& x : std::span(getDataBlock(index), blockSize_))
+    {
+      std::cout << (x) << " ";
+    }
+    std::cout << "\n  h: ";
+    for(auto& x : std::span(H_ + (blockSize_ * index), blockSize_))
+    {
+      std::cout << (x) << " ";
+    }*/
+
     multiply(result.data(), H_ + (blockSize_ * index), getDataBlock(index), blockSize_);
+
+    /*std::cout << "\n  output: ";
+    for(auto& x : std::span(result))
+    {
+      std::cout << (x) << " ";
+    }
+    std::cout << std::endl;*/
 
     auto maxIndex = std::min<uint32_t>(numBlocks_, index + numBlocks);
     while(++index < maxIndex)
@@ -297,7 +342,7 @@ protected:
 
   void pushDataBlock(std::complex<float>* Hdata)
   {
-    std::cout << "shift\n";
+    /*std::cout << "shift\n";
     for(uint32_t i{0}; i < numBlocks_; ++i)
     {
       std::cout << "  block[" << (i) << "]:  ";
@@ -307,7 +352,7 @@ protected:
       }
       std::cout << std::endl;
     }
-    std::cout << std::endl;
+    std::cout << std::endl;*/
 
     memcpy(getDataBlock(0), Hdata, blockSize_ * sizeof(Hdata[0]));
     firstBlock_ = (++firstBlock_ == numBlocks_) ? 0 : firstBlock_;
@@ -322,7 +367,6 @@ protected:
     return delayLine_ + i * blockSize_;
   }
 
-  uint32_t inputBlockSize_;
   uint32_t subFilterSize_;
   uint32_t fftSize_;
   int32_t numBlocks_;
