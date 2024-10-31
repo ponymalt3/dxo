@@ -13,9 +13,12 @@
 
 #include "../tasks/tasks.h"
 #include "fft.h"
+
 using ComplexVec = std::vector<std::complex<float>>;
 using RealVec = std::vector<float>;
 using TaskType = std::shared_ptr<Task>;
+
+static_assert(sizeof(std::complex<float>) == sizeof(fftwf_complex));
 
 static void multiply(std::complex<float>* result,
                      const std::complex<float>* src1,
@@ -77,28 +80,22 @@ static void add(std::complex<float>* result,
 class Convolution
 {
 public:
-  Convolution(const RealData& h, uint32_t inputBlockSize)
-      : Convolution(
-            h,
-            inputBlockSize,
-            (1 << static_cast<uint32_t>(std::ceil(std::log2(inputBlockSize) + 1))) - inputBlockSize + 1)
+  enum : uint32_t
   {
-  }
-  Convolution(const RealData& h, uint32_t inputBlockSize, uint32_t subFilterSize)
-      : subFilterSize_{subFilterSize},
-        fftSize_{inputBlockSize + subFilterSize_ - 1},
-        forwardFft_{fftSize_},
+    AutoSubFilterSize = 0xFFFFFFFF
+  };
+
+  Convolution(const RealData& h, uint32_t inputBlockSize, uint32_t subFilterSize = AutoSubFilterSize)
+      : subFilterSize_{subFilterSize == AutoSubFilterSize ? getSubFilterSize(inputBlockSize) : subFilterSize},
+        fftSize_{inputBlockSize + subFilterSize_},
         inverseFft_{fftSize_}
   {
-    std::cout << "fft: " << (fftSize_) << std::endl;
-    blockSize_ = forwardFft_.output_.size();
-    numBlocks_ = (h.size() + subFilterSize_ - 1) / subFilterSize_;
+    blockSize_ = fftSize_ / 2 + 1;
+    numBlocks_ = (fftSize_ + subFilterSize_ - 1) / subFilterSize_;
     assert(numBlocks_ > 1 && "must be more than one block");
     assert(subFilterSize_ >= inputBlockSize && "subFilterSize must be greater than inputBlockSize");
     H_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
     delayLine_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
-    XX_ = new(std::align_val_t(64)) float[subFilterSize_];
-    memset(XX_, 0, sizeof(float) * subFilterSize_);
 
     // clear delay line
     for(uint32_t i{0}; i < numBlocks_; ++i)
@@ -130,13 +127,10 @@ public:
 
       fft.run();
 
-      // std::cout << "H[" << (i) << "]:\n";
       for(auto f : fft.output_)
       {
         *(dst++) = f;
-        // std::cout << (f) << " ";
       }
-      // std::cout << std::endl;
     }
   }
 
@@ -144,24 +138,27 @@ public:
   {
     delete[] H_;
     delete[] delayLine_;
-    delete[] XX_;
   }
 
-  std::tuple<TaskType, RealData> getInputTask()
+  static std::tuple<TaskType, RealData> getInputTask(uint32_t inputBlockSize,
+                                                     uint32_t subFilterSize = AutoSubFilterSize)
   {
-    auto fft = Task::create<ComplexData>(
-        [this](Task& task) {
-          memcpy(forwardFft_.input_.data(), XX_, (subFilterSize_ - 1) * sizeof(float));
-          auto x = forwardFft_.input_.last(subFilterSize_ - 1);
-          memcpy(XX_, x.data(), x.size() * sizeof(float));
+    subFilterSize = (subFilterSize == AutoSubFilterSize) ? getSubFilterSize(inputBlockSize) : subFilterSize;
+    auto forwardFft = std::make_shared<ForwardFFT>(inputBlockSize + subFilterSize);
+    auto overlapBuffer = std::shared_ptr<float>(new(std::align_val_t(64)) float[subFilterSize]);  // align mem
+    memset(overlapBuffer.get(), 0, sizeof(float) * subFilterSize);
 
-          /*std::cout << "Input size: " << (forwardFft_.input_.size()) << std::endl;
-          for(auto& i : forwardFft_.input_)
+    auto fft = Task::create<ComplexData>(
+        [subFilterSize, inputBlockSize, forwardFft, overlapBuffer](Task& task) {
+          auto x = forwardFft->input_.last(subFilterSize);
+          memcpy(forwardFft->input_.data(), overlapBuffer.get(), (subFilterSize) * sizeof(float));
+          x = forwardFft->input_.last(subFilterSize);
+          memcpy(overlapBuffer.get(), x.data(), x.size() * sizeof(float));
           {
             std::cout << (i) << " ";
           }
           std::cout << std::endl;*/
-          forwardFft_.run();
+          forwardFft->run();
 
           /*std::cout << "resul: " << std::endl;
           for(auto& i : task.getArtifact<ComplexData>())
@@ -171,9 +168,9 @@ public:
           std::cout << std::endl;*/
         },
         {},
-        forwardFft_.output_.subspan(0));
+        forwardFft->output_.subspan(0));
 
-    return {fft, forwardFft_.input_.subspan(subFilterSize_ - 1)};
+    return {fft, forwardFft->input_.last(inputBlockSize)};
   }
 
   std::tuple<std::vector<TaskType>, RealData> getOutputTasks(TaskType input, uint32_t combineBlocks = 4)
@@ -236,10 +233,8 @@ public:
 
     auto combine = Task::create<ComplexData>(
         [this](Task& task) {
-          // std::cout << "Combine:" << std::endl;
           auto result = task.getArtifact<ComplexData>().data();
 
-          /*std::cout << "\n  input: ";
           for(auto& x : task.getDependencies()[0]->getArtifact<ComplexData>())
           {
             std::cout << (x) << " ";
@@ -248,7 +243,6 @@ public:
           for(auto& x : std::span(H_, blockSize_))
           {
             std::cout << (x) << " ";
-          }*/
 
           multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
 
@@ -298,6 +292,11 @@ public:
   }
 
 protected:
+  static uint32_t getSubFilterSize(uint32_t inputBlockSize)
+  {
+    return (1 << static_cast<uint32_t>(std::ceil(std::log2(inputBlockSize) + 1))) - inputBlockSize + 1;
+  }
+
   void multiplyAddBlocks(uint32_t index, ComplexVec& result, uint32_t numBlocks = 1) const
   {
     /*std::cout << "Multiply Add:\n  input: ";
@@ -371,7 +370,6 @@ protected:
   uint32_t fftSize_;
   int32_t numBlocks_;
   uint32_t blockSize_;
-  float* XX_;
   std::complex<float>* H_;
   std::complex<float>* delayLine_;
   int32_t firstBlock_{0};
