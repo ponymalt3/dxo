@@ -42,3 +42,5 @@ fftw3f
 googletest*
 _deps
 lib
+
+CTestTestfile.cmake
