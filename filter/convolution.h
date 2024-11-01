@@ -154,10 +154,12 @@ public:
           memcpy(forwardFft->input_.data(), overlapBuffer.get(), (subFilterSize) * sizeof(float));
           x = forwardFft->input_.last(subFilterSize);
           memcpy(overlapBuffer.get(), x.data(), x.size() * sizeof(float));
+          std::cout << "input: " << std::endl;
+          for(auto& i : forwardFft->input_)
           {
             std::cout << (i) << " ";
           }
-          std::cout << std::endl;*/
+          std::cout << std::endl;
           forwardFft->run();
 
           /*std::cout << "resul: " << std::endl;
@@ -244,27 +246,28 @@ public:
           {
             std::cout << (x) << " ";
 
-          multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
+            multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
 
-          /*std::cout << "\n  multipy: ";
-          for(auto& x : task.getArtifact<ComplexData>())
-          {
-            std::cout << (x) << " ";
+            /*std::cout << "\n  multipy: ";
+            for(auto& x : task.getArtifact<ComplexData>())
+            {
+              std::cout << (x) << " ";
+            }
+            std::cout << "\n  add: ";
+            for(auto& x : task.getDependencies()[1]->getArtifact<ComplexVec>())
+            {
+              std::cout << (x) << " ";
+            }*/
+
+            add(result, result, task.getDependencies()[1]->getArtifact<ComplexVec>().data(), blockSize_);
+
+            /*std::cout << "\n  result: ";
+            for(auto& x : task.getArtifact<ComplexData>())
+            {
+              std::cout << (x) << " ";
+            }
+            std::cout << std::endl;*/
           }
-          std::cout << "\n  add: ";
-          for(auto& x : task.getDependencies()[1]->getArtifact<ComplexVec>())
-          {
-            std::cout << (x) << " ";
-          }*/
-
-          add(result, result, task.getDependencies()[1]->getArtifact<ComplexVec>().data(), blockSize_);
-
-          /*std::cout << "\n  result: ";
-          for(auto& x : task.getArtifact<ComplexData>())
-          {
-            std::cout << (x) << " ";
-          }
-          std::cout << std::endl;*/
         },
         {input, sumUpTasks.front()},
         inverseFft_.input_.subspan(0));
@@ -286,7 +289,7 @@ public:
           std::cout << std::endl;*/
         },
         {combine, shift},
-        inverseFft_.output_.subspan(subFilterSize_ - 1));
+        inverseFft_.output_.subspan(subFilterSize_));
 
     return {{rootTask, resultTask}, resultTask->getArtifact<RealData>()};
   }
@@ -373,6 +376,5 @@ protected:
   std::complex<float>* H_;
   std::complex<float>* delayLine_;
   int32_t firstBlock_{0};
-  ForwardFFT forwardFft_;
   BackwardFFT inverseFft_;
 };

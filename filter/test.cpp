@@ -8,8 +8,6 @@
 
 #include "convolution.h"
 
-using namespace std::chrono_literals;
-
 class FirFilterTest : public testing::Test
 {
 public:
@@ -40,21 +38,23 @@ protected:
 
 TEST_F(FirFilterTest, Test_ParallelFirConvolution)
 {
+  using namespace std::chrono_literals;
+
   std::vector<float> h{1, -1, 2, 3, 5, 9, 0, 0, 0, 0, 0, 0, 0, 0};
-  std::vector<float> data{3, -1, 0, 3, 2, 0, 1, 2, 1, 8, 8, 8, 1, 2, 3, 4,
-                          0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  std::vector<float> data{3, -1, 0, 3, 2, 0, 1, 2, 1, 8, 8, 8, 1, 2, 3, 4, 0, 0, 0, 0,
+                          0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
   auto result_conv = convolve(h, data);
 
-  uint32_t blockSize = 4;
+  uint32_t blockSize = 3, fftSize = 8;
 
-  Convolution filter(h, blockSize, 4);
-  auto [inputJob, input] = Convolution::getInputTask(blockSize, 4);
+  Convolution filter(h, blockSize);
+  auto [inputJob, input] = Convolution::getInputTask(blockSize);
   auto [rootJobs, output] = filter.getOutputTasks(inputJob, 4);
 
   RealVec result_upc;
   uint32_t j = 0;
-  for(uint32_t k{0}; k < data.size() / 4; k++)
+  for(uint32_t k{0}; k < data.size() / blockSize; k++)
   {
     runner_.run(rootJobs, false);
     std::this_thread::sleep_for(500ms);
@@ -73,12 +73,12 @@ TEST_F(FirFilterTest, Test_ParallelFirConvolution)
     }
   }
 
-  /*ASSERT_EQ(result_upc.size(), result_conv.size());
+  ASSERT_EQ(result_upc.size(), result_conv.size());
 
   for(uint32_t i{0}; i < result_upc.size(); ++i)
   {
     EXPECT_NEAR(result_upc[i], result_conv[i], 0.0001f);
-  }*/
+  }
 
   std::cout << "result:\n";
   for(auto f : result_upc)
