@@ -18,6 +18,7 @@ public:
       : input_{new(std::align_val_t(64)) float[size], size},
         output_{new(std::align_val_t(64)) std::complex<float>[size / 2 + 1], size / 2 + 1}
   {
+    std::cout << "XXXXXX" << std::endl;
     plan_ = fftwf_plan_dft_r2c_1d(size,
                                   input_.data(),
                                   reinterpret_cast<fftwf_complex*>(output_.data()),

@@ -88,6 +88,7 @@ public:
     blockSize_ = fftSize_ / 2 + 1;
     numBlocks_ = (h.size() + subFilterSize_ - 1) / subFilterSize_;
     assert(numBlocks_ > 1 && "must be more than one block");
+    // assert(subFilterSize_ >= inputBlockSize && "subFilterSize must be greater than inputBlockSize");
     H_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
     delayLine_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
 
@@ -227,8 +228,10 @@ public:
     auto combine = Task::create<ComplexData>(
         [this](Task& task) {
           auto result = task.getArtifact<ComplexData>().data();
+          // std::cout << "\n  h: ";
           for(auto& x : std::span(H_, blockSize_))
           {
+            // std::cout << (x) << " ";
 
             multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
 
