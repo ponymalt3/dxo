@@ -80,20 +80,14 @@ static void add(std::complex<float>* result,
 class Convolution
 {
 public:
-  enum : uint32_t
+  Convolution(const std::span<const float>& h, uint32_t inputBlockSize)
+      : subFilterSize_{inputBlockSize}, fftSize_{inputBlockSize + subFilterSize_}, inverseFft_{fftSize_}
   {
-    AutoSubFilterSize = 0xFFFFFFFF
-  };
+    std::cout << "FFT SIZE " << (fftSize_) << std::endl;
 
-  Convolution(const RealData& h, uint32_t inputBlockSize, uint32_t subFilterSize = AutoSubFilterSize)
-      : subFilterSize_{subFilterSize == AutoSubFilterSize ? getSubFilterSize(inputBlockSize) : subFilterSize},
-        fftSize_{inputBlockSize + subFilterSize_},
-        inverseFft_{fftSize_}
-  {
     blockSize_ = fftSize_ / 2 + 1;
-    numBlocks_ = (fftSize_ + subFilterSize_ - 1) / subFilterSize_;
+    numBlocks_ = (h.size() + subFilterSize_ - 1) / subFilterSize_;
     assert(numBlocks_ > 1 && "must be more than one block");
-    assert(subFilterSize_ >= inputBlockSize && "subFilterSize must be greater than inputBlockSize");
     H_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
     delayLine_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
 
@@ -140,10 +134,9 @@ public:
     delete[] delayLine_;
   }
 
-  static std::tuple<TaskType, RealData> getInputTask(uint32_t inputBlockSize,
-                                                     uint32_t subFilterSize = AutoSubFilterSize)
+  static std::tuple<TaskType, RealData> getInputTask(uint32_t inputBlockSize)
   {
-    subFilterSize = (subFilterSize == AutoSubFilterSize) ? getSubFilterSize(inputBlockSize) : subFilterSize;
+    auto subFilterSize = inputBlockSize;
     auto forwardFft = std::make_shared<ForwardFFT>(inputBlockSize + subFilterSize);
     auto overlapBuffer = std::shared_ptr<float>(new(std::align_val_t(64)) float[subFilterSize]);  // align mem
     memset(overlapBuffer.get(), 0, sizeof(float) * subFilterSize);
@@ -177,8 +170,6 @@ public:
 
   std::tuple<std::vector<TaskType>, RealData> getOutputTasks(TaskType input, uint32_t combineBlocks = 4)
   {
-    std::cout << "numBlocks_: " << (numBlocks_) << std::endl;
-
     auto rootTask = Task::create<uint32_t>([](Task& task) {});
     // first level multiply and add
     std::vector<TaskType> deps;
@@ -236,15 +227,8 @@ public:
     auto combine = Task::create<ComplexData>(
         [this](Task& task) {
           auto result = task.getArtifact<ComplexData>().data();
-
-          for(auto& x : task.getDependencies()[0]->getArtifact<ComplexData>())
-          {
-            std::cout << (x) << " ";
-          }
-          std::cout << "\n  h: ";
           for(auto& x : std::span(H_, blockSize_))
           {
-            std::cout << (x) << " ";
 
             multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
 
@@ -297,7 +281,7 @@ public:
 protected:
   static uint32_t getSubFilterSize(uint32_t inputBlockSize)
   {
-    return (1 << static_cast<uint32_t>(std::ceil(std::log2(inputBlockSize) + 1))) - inputBlockSize + 1;
+    return (1 << static_cast<uint32_t>(std::ceil(std::log2(inputBlockSize) + 1))) - inputBlockSize;
   }
 
   void multiplyAddBlocks(uint32_t index, ComplexVec& result, uint32_t numBlocks = 1) const

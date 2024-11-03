@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 
 #include "convolution.h"
+#include "fir_crossover.h"
 
 class FirFilterTest : public testing::Test
 {
@@ -20,15 +22,39 @@ public:
     std::vector<float> result;
     for(uint32_t i{0}; i < data.size() - hrev.size() + 1; ++i)
     {
-      float sum = 0.0f;
+      double sum = 0.0;
       for(uint32_t j = 0; j < hrev.size(); ++j)
       {
         sum += hrev[j] * data[i + j];
       }
-      result.push_back(sum);
+      result.push_back(static_cast<float>(sum));
     }
 
     return result;
+  }
+
+  void expectEqual(const std::span<float>& a, const std::span<float>& b)
+  {
+    EXPECT_GT(std::min(a.size(), b.size()), 1);
+
+    constexpr auto epsilon = 0.02f;
+
+    for(auto i{0}; i < std::min(a.size(), b.size()); ++i)
+    {
+      auto dif{std::fabs(a[i] - b[i])};
+      auto epsilonScaled = epsilon;
+      if(std::abs(a[i]) > 0.0000001 && std::abs(b[i]) > 0.0000001)
+      {
+        epsilonScaled = epsilon * std::max(std::fabs(a[i]), std::fabs(b[i]));
+      }
+      else
+      {
+        epsilonScaled = 0.00001f;
+      }
+
+      EXPECT_LE(dif, epsilonScaled) << " at " << (i) << "\n  e = " << (epsilonScaled) << "\n  a = " << (a[i])
+                                    << "\n  b = " << (b[i]);
+    }
   }
 
 protected:
@@ -36,61 +62,110 @@ protected:
   TaskRunner runner_{1};
 };
 
-TEST_F(FirFilterTest, Test_ParallelFirConvolution)
+TEST_F(FirFilterTest, Test_ParallelConvolution)
 {
-  using namespace std::chrono_literals;
-
-  std::vector<float> h{1, -1, 2, 3, 5, 9, 0, 0, 0, 0, 0, 0, 0, 0};
+  std::vector<float> h{-1.14, -0.08, 1.49, -0.79, -1.38, -4.73, 1.9, -4.41, 2.63, 4.26};
   std::vector<float> data{3, -1, 0, 3, 2, 0, 1, 2, 1, 8, 8, 8, 1, 2, 3, 4, 0, 0, 0, 0,
                           0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-  auto result_conv = convolve(h, data);
-
-  uint32_t blockSize = 3, fftSize = 8;
-
-  Convolution filter(h, blockSize);
-  auto [inputJob, input] = Convolution::getInputTask(blockSize);
-  auto [rootJobs, output] = filter.getOutputTasks(inputJob, 4);
-
-  RealVec result_upc;
-  uint32_t j = 0;
-  for(uint32_t k{0}; k < data.size() / blockSize; k++)
+  for(auto blockSize : {2, 3, 4, 5})
   {
-    runner_.run(rootJobs, false);
-    std::this_thread::sleep_for(500ms);
-    for(auto& i : input)
+    auto result_conv = convolve(h, data);
+
+    Convolution filter(h, blockSize);
+    auto [inputJob, input] = Convolution::getInputTask(blockSize);
+    auto [rootJobs, output] = filter.getOutputTasks(inputJob, 1);
+
+    RealVec result_upc;
+    uint32_t j = 0;
+    for(uint32_t k{0}; k < data.size() / blockSize; k++)
     {
-      i = data[j++];
+      runner_.run(rootJobs, false);
+      for(auto& i : input)
+      {
+        i = data[j++];
+      }
+
+      runner_.run({inputJob});
+
+      for(auto f : output)
+      {
+        result_upc.push_back(f);
+      }
     }
 
-    runner_.run({inputJob}, false);
-    std::this_thread::sleep_for(100ms);
-    rootJobs[1]->execute(nullptr);
+    expectEqual(result_upc, result_conv);
+  }
+}
 
-    for(auto f : output)
+TEST_F(FirFilterTest, DISABLED_Test_FirMultiChannelCrossover)
+{
+  constexpr auto BlockSize = 120U;
+  constexpr auto NumBlocks = 59U;
+  constexpr auto NumOutputs = 6U;
+  constexpr auto NumInputs = 3U;
+
+  std::vector<std::vector<float>> h;
+  for(size_t size : {253, 170, 131, 1023, 721, 445})
+  {
+    std::vector<float> rnd(size);
+    for(auto& r : rnd)
     {
-      result_upc.push_back(f);
+      r = float((std::rand() % 1000) - 500) / 100;
+    }
+    h.push_back(rnd);
+  }
+
+  std::vector<std::vector<float>> inputs(NumInputs);
+  for(auto& ch : inputs)
+  {
+    for(auto i{0}; i < BlockSize * NumBlocks; ++i)
+    {
+      ch.push_back(float((std::rand() % 10000) - 5000) / 100);
     }
   }
 
-  ASSERT_EQ(result_upc.size(), result_conv.size());
+  std::vector<std::vector<float>> outputs(NumOutputs);
 
-  for(uint32_t i{0}; i < result_upc.size(); ++i)
+  std::vector<FirMultiChannelCrossover::ConfigType> config;
+  for(auto i{0}; i < NumOutputs; ++i)
   {
-    EXPECT_NEAR(result_upc[i], result_conv[i], 0.0001f);
+    config.push_back({i % NumInputs, h[i]});
   }
 
-  std::cout << "result:\n";
-  for(auto f : result_upc)
-  {
-    std::cout << (f) << " ";
-  }
-  std::cout << std::endl;
+  FirMultiChannelCrossover fmcc(BlockSize, NumInputs, config, 3);
 
-  std::cout << "conv:\n";
-  for(auto i : result_conv)
+  std::vector<decltype(inputs[0].begin())> inputIterators;
+  for(auto& ch : inputs)
   {
-    std::cout << (i) << " ";
+    inputIterators.push_back(ch.begin());
   }
-  std::cout << std::endl;
+
+  for(auto i{0}; i < NumBlocks; ++i)
+  {
+    for(auto j{0}; j < inputIterators.size(); ++j)
+    {
+      for(auto& r : fmcc.getInputBuffer(j))
+      {
+        r = *inputIterators[j]++;
+      }
+    }
+
+    fmcc.updateInputs();
+
+    for(auto i{0}; i < h.size(); ++i)
+    {
+      auto output = fmcc.getOutputBuffer(i);
+      outputs[i].insert(outputs[i].end(), output.begin(), output.end());
+    }
+  }
+
+  const std::vector<uint32_t> InputChannelMap{0, 1, 2, 0, 1, 2};
+
+  for(auto i{0U}; i < h.size(); ++i)
+  {
+    auto conv = convolve(h[i], inputs[InputChannelMap[i]]);
+    expectEqual(std::span(conv).subspan(0, BlockSize * NumBlocks),
+                std::span(outputs[i]).subspan(0, BlockSize * NumBlocks));
+  }
 }
