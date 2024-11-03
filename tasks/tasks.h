@@ -164,7 +164,7 @@ protected:
       std::unique_lock lock(mutex_);
       state_ += increment;
     }
-    cv_.notify_all();
+    cv_.notify_one();
   }
 
   uint32_t waitFor(uint32_t state)
@@ -191,7 +191,7 @@ protected:
         }
 
         // std::cout << "Sleeping..." << std::endl;
-        state = waitFor(++state);
+        waitFor(++state);
       }
       else
       {
