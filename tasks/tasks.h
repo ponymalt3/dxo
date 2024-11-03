@@ -3,7 +3,6 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <semaphore>
 #include <thread>

@@ -1,15 +1,16 @@
 #include <gtest/gtest.h>
+
 #include <initializer_list>
-#include <vector>
-#include "pcm_stream.h"
 #include <iostream>
+#include <vector>
 
+#include "pcm_stream.h"
 
-template<typename SampleType>
+template <typename SampleType>
 class Channel : public snd_pcm_channel_area_t
 {
 public:
-  Channel(SampleType *addr, uint32_t size, uint32_t step)
+  Channel(SampleType* addr, uint32_t size, uint32_t step)
   {
     this->addr = addr;
     this->step = sizeof(SampleType) * 8 * step;
@@ -20,7 +21,8 @@ public:
     for(auto d : data)
     {
       reinterpret_cast<SampleType*>(addr)[offset * step / (sizeof(SampleType) * 8)] = d;
-      std::cout<<"set "<<((void*)(reinterpret_cast<SampleType*>(addr)+(offset * step / (sizeof(SampleType) * 8))))<<" to "<<(d)<<std::endl;
+      // std::cout<<"set "<<((void*)(reinterpret_cast<SampleType*>(addr)+(offset * step / (sizeof(SampleType)
+      // * 8))))<<" to "<<(d)<<std::endl;
       ++offset;
     }
   }
@@ -38,28 +40,26 @@ public:
   }
 };
 
-class PcmStreamTest : public testing::Test {
- protected:
-  PcmStreamTest() {
+class PcmStreamTest : public testing::Test
+{
+protected:
+  PcmStreamTest()
+  {
     buffer1 = new int16_t[3 * 256];
     buffer2 = new int32_t[8 * 256];
 
-    linear = {
-      Channel<int16_t>(buffer1 + 0, 256, 1),
-      Channel<int16_t>(buffer1 + 256, 256, 1),
-      Channel<int16_t>(buffer1 + 512, 256, 1)
-    };
+    linear = {Channel<int16_t>(buffer1 + 0, 256, 1),
+              Channel<int16_t>(buffer1 + 256, 256, 1),
+              Channel<int16_t>(buffer1 + 512, 256, 1)};
 
-    interleaved = {
-      Channel<int32_t>(buffer2 + 0, 256, 8),
-      Channel<int32_t>(buffer2 + 1, 256, 8),
-      Channel<int32_t>(buffer2 + 2, 256, 8),
-      Channel<int32_t>(buffer2 + 3, 256, 8),
-      Channel<int32_t>(buffer2 + 4, 256, 8),
-      Channel<int32_t>(buffer2 + 5, 256, 8),
-      Channel<int32_t>(buffer2 + 6, 256, 8),
-      Channel<int32_t>(buffer2 + 7, 256, 8)
-    };
+    interleaved = {Channel<int32_t>(buffer2 + 0, 256, 8),
+                   Channel<int32_t>(buffer2 + 1, 256, 8),
+                   Channel<int32_t>(buffer2 + 2, 256, 8),
+                   Channel<int32_t>(buffer2 + 3, 256, 8),
+                   Channel<int32_t>(buffer2 + 4, 256, 8),
+                   Channel<int32_t>(buffer2 + 5, 256, 8),
+                   Channel<int32_t>(buffer2 + 6, 256, 8),
+                   Channel<int32_t>(buffer2 + 7, 256, 8)};
   }
 
   ~PcmStreamTest()
@@ -67,23 +67,22 @@ class PcmStreamTest : public testing::Test {
     linear.clear();
     interleaved.clear();
 
-    delete [] buffer1;
-    delete [] buffer2;
+    delete[] buffer1;
+    delete[] buffer2;
   }
 
-  int16_t *buffer1;
-  int32_t *buffer2;
+  int16_t* buffer1;
+  int32_t* buffer2;
   std::vector<Channel<int16_t>> linear;
   std::vector<Channel<int32_t>> interleaved;
 };
-
 
 TEST_F(PcmStreamTest, Test_InterleavedExtract)
 {
   float ch1[16], ch2[16], ch3[16], ch4[16], ch5[16], ch6[16], ch7[16], ch8[16];
 
   int32_t i = 0;
-  for(auto &c : interleaved)
+  for(auto& c : interleaved)
   {
     c.setData(0, {i++, i++, i++, i++});
   }

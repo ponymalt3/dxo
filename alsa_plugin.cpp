@@ -1,138 +1,92 @@
 
 #include <alsa/asoundlib.h>
 #include <alsa/pcm_external.h>
-
 #include <stdint.h>
-#include <string>
-#include <fstream>
 
+#include <fstream>
+#include <string>
+#include <vector>
+
+#include "crossover/fir_crossover.h"
 #include "fftw3.h"
 #include "pcm_stream.h"
-
-/*
-
-
-#include <alsa/asoundlib.h>
-#include <alsa/pcm_external.h>
-#include <alsa/output.h>
-
-
-*/
-
-/*
-class DigitalCrossover
-{
-public:
-  DigitalCrossover(uint32_t blockSize) : log_("/home/kodi/dxottt.log",std::ios::app|std::ios::out)
-  {
-    blockSize_=blockSize;
-
-    inputOffset_=0;
-    outputOffset_=0;
-    filterLength_=0;
-    formatChecked_=false;
-  }
-
-  ~DigitalCrossover()
-  {
-  }
-
-  bool loadFilterData(const std::string &path)
-  {
-
-    return true;
-  }
-
-  template<typename SampleType,uint32_t NumInputChannel,uint32_t NumOutputChannel>
-  uint32_t update(const snd_pcm_channel_area_t *dst_areas,
-                  snd_pcm_uframes_t dst_offset,
-                  const snd_pcm_channel_area_t *src_areas,
-                  snd_pcm_uframes_t src_offset,
-                  snd_pcm_uframes_t size,snd_output_t *out)
-  {
-    if(!formatChecked_)
-    {
-      //assert that format is interleaved eg
-      // cha | chb | chc | chd ... | cha | chb | ...
-
-      formatChecked_=true;
-    }
-
-    //snd_pcm_areas_copy(dst_areas,dst_offset,src_areas,src_offset,2,size,SND_PCM_FORMAT_S16_LE);
-
-    uint32_t samples=0;
-
-    uint32_t x=size;
-
-    //snd_output_printf(out,"blockSize: %d size: %d inputOff: %d samples: %d\n",blockSize_,x,inputOffset_,samples);
-
-    //log_<<"call: "<<(size)<<"  selected samples: "<<(samples)<<"\n  blocksize: "<<(blockSize_)<<"\n  "<<(inputOffset_)<<"\n";
-
-      
-
-    //snd_output_printf(out,"  samples: %d\n",samples);
-    //snd_output_printf(out,"  inputOffset_+samples: %d\n",inputOffset_+samples);
-
-
-    snd_pcm_areas_copy(dst_areas,dst_offset,src_areas,src_offset,2,samples,SND_PCM_FORMAT_S16_LE);
-
-    outputOffset_+=samples;
-
-    //log_<<"new inputOffset: "<<(inputOffset_)<<"  outputOffset: "<<(outputOffset_)<<"\n";
-
-    return samples;
-  }
-
-protected:
-  uint32_t blockSize_;
-  uint32_t filterLength_;
-
-  std::fstream log_;
-
-  uint32_t inputOffset_;
-  uint32_t outputOffset_;
-
-  bool formatChecked_;
-};*/
-
 
 class AlsaPluginDxO : public snd_pcm_extplug_t
 {
 public:
-  AlsaPluginDxO()
+  AlsaPluginDxO(const std::string& path, uint32_t blockSize) : blockSize_(blockSize), inputs_(3), outputs_(8)
   {
     memset(this, 0, sizeof(snd_pcm_extplug_t));
 
-    for(auto &i : inputs)
+    auto coeffs = loadFIRCoeffs(path);
+
+    assert(coeffs.size() == 7 && "Coeffs file need to provide 7 FIR transfer functions");
+
+    std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
+                                                             {0, coeffs[1]},
+                                                             {0, coeffs[2]},
+                                                             {1, coeffs[3]},
+                                                             {1, coeffs[4]},
+                                                             {1, coeffs[5]},
+                                                             {2, coeffs[6]}};
+
+    crossover_ = std::make_unique<FirMultiChannelCrossover>(blockSize_, 3, config, 2);
+
+    for(auto i{0}; i < inputs_.size(); ++i)
     {
-      i = new float [bufferSize_];
+      inputs_[i] = crossover_->getInputBuffer(i).data();
     }
 
-    for(auto &o : outputs)
+    for(auto i{0}; i < outputs_.size(); ++i)
     {
-      o = new float [bufferSize_];
+      outputs_[i] = crossover_->getOutputBuffer(i).data();
     }
   }
 
-  ~AlsaPluginDxO()
+  ~AlsaPluginDxO() {}
+
+  std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path)
   {
-    for(auto &i : inputs)
+    std::ifstream file(path);
+
+    if(!file.is_open() || !file.good())
     {
-      delete [] i;
+      return {};
     }
 
-    for(auto &o : outputs)
+    std::vector<std::vector<float>> filters;
+
+    while(!file.eof())
     {
-      delete [] o;
+      std::vector<float> coeffs;
+
+      while(file.peek() != '\n')
+      {
+        while(file.peek() == ' ' || file.peek() == '\r')
+        {
+          file.ignore(1);
+        }
+
+        double value = 0;
+        file >> value;
+        coeffs.push_back(static_cast<float>(value));
+      }
+
+      // ignore \n
+      file.ignore(1);
+
+      filters.push_back(coeffs);
     }
+
+    return filters;
   }
 
-  template<typename _InputSampleType, bool _HasLfeChannel>
-  uint32_t update(const snd_pcm_channel_area_t *dst_areas,
-            snd_pcm_uframes_t dst_offset,
-            const snd_pcm_channel_area_t *src_areas,
-            snd_pcm_uframes_t src_offset,
-            snd_pcm_uframes_t size)
+  template <typename _InputSampleType, bool _HasLfeChannel>
+  uint32_t update(const snd_pcm_channel_area_t* dst_areas,
+                  snd_pcm_uframes_t dst_offset,
+                  const snd_pcm_channel_area_t* src_areas,
+                  snd_pcm_uframes_t src_offset,
+                  snd_pcm_uframes_t size)
   {
     PcmStream<_InputSampleType> dst(dst_areas, dst_offset);
     PcmStream<_InputSampleType> src(src_areas, src_offset);
@@ -142,42 +96,49 @@ public:
 
     if(_HasLfeChannel)
     {
-      src.extractInterleaved(128, inputs[0], inputs[1], inputs[2]);
+      src.extractInterleaved(blockSize_, inputs_[0], inputs_[1], inputs_[2]);
     }
     else
     {
-      src.extractInterleaved(128, inputs[0], inputs[1]);
+      src.extractInterleaved(blockSize_, inputs_[0], inputs_[1]);
 
-      for(uint32_t i = 0; i < bufferSize_; ++i)
+      for(uint32_t i = 0; i < blockSize_; ++i)
       {
-        inputs[2][i] = (inputs[0][i] + inputs[1][i]) / 2;
+        inputs_[2][i] = (inputs_[0][i] + inputs_[1][i]) / 2;
       }
     }
 
-    dst.loadInterleaved(128, inputs[0], inputs[1], inputs[0], inputs[1], inputs[2], inputs[2], inputs[0], inputs[1]);
+    dst.loadInterleaved(blockSize_,
+                        outputs_[0],
+                        outputs_[1],
+                        outputs_[2],
+                        outputs_[3],
+                        outputs_[0],  // unused
+                        outputs_[6],
+                        outputs_[4],
+                        outputs_[5]);
 
-    return 128;
+    return blockSize_;
   }
+
   uint32_t x{0};
-  uint32_t bufferSize_{128};
-  uint32_t blockSize_{0};
-  std::string coeffPath_{};
-  //DigitalCrossover *dxo_{nullptr};
-  snd_output_t *output_{nullptr};
-  float *inputs[3];
-  float *outputs[8];
+  uint32_t blockSize_{128};
+  std::vector<float*> inputs_;
+  std::vector<float*> outputs_;
+  snd_output_t* output_{nullptr};
+  std::unique_ptr<FirMultiChannelCrossover> crossover_;
 };
 
 extern "C" {
 
-snd_pcm_sframes_t dxo_transfer(snd_pcm_extplug_t *ext,
-            const snd_pcm_channel_area_t *dst_areas,
-            snd_pcm_uframes_t dst_offset,
-            const snd_pcm_channel_area_t *src_areas,
-            snd_pcm_uframes_t src_offset,
-            snd_pcm_uframes_t size)
+snd_pcm_sframes_t dxo_transfer(snd_pcm_extplug_t* ext,
+                               const snd_pcm_channel_area_t* dst_areas,
+                               snd_pcm_uframes_t dst_offset,
+                               const snd_pcm_channel_area_t* src_areas,
+                               snd_pcm_uframes_t src_offset,
+                               snd_pcm_uframes_t size)
 {
-  auto *plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
 
   snd_output_printf(plugin->output_, "XXX\n");
   snd_output_printf(plugin->output_, "  size %d\n", size);
@@ -219,39 +180,25 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_extplug_t *ext,
   return size;
 }
 
-int dxo_init(snd_pcm_extplug_t *ext)
+int dxo_init(snd_pcm_extplug_t* ext)
 {
-  auto *plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
 
   snd_output_printf(plugin->output_, "dxo_init\n");
   snd_output_flush(plugin->output_);
 
-  uint32_t sampleRate = 0;//plugin->rate;
+  uint32_t sampleRate = 0;  // plugin->rate;
   snd_output_printf(plugin->output_, "samplerate: %d\n", sampleRate);
-
-  //if(plugin->dxo_ != 0)
-  {
-    //delete plugin->dxo_;
-  }
-
-  //plugin->dxo_ = new DigitalCrossover(plugin->blockSize_);
-  //plugin->dxo_->loadFilterData(plugin->coeffPath_);
 
   return 0;
 }
 
-int dxo_close(snd_pcm_extplug_t *ext)
+int dxo_close(snd_pcm_extplug_t* ext)
 {
-  auto *plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
 
   snd_output_printf(plugin->output_, "dxo_close\n");
   snd_output_flush(plugin->output_);
-
-  //if(plugin->dxo_)
-  //{
-  //  delete plugin->dxo_;
-  //  plugin->dxo_ = nullptr;
-  //}
 
   delete plugin;
 
@@ -260,23 +207,23 @@ int dxo_close(snd_pcm_extplug_t *ext)
 
 // Channel map (ALSA channel definitions)
 static const unsigned int kChannelMap[] = {
-        SND_CHMAP_FL,  // Front Left
-        SND_CHMAP_FR,  // Front Right
-        SND_CHMAP_RL,  // Rear Left
-        SND_CHMAP_RR,  // Rear Right
-        SND_CHMAP_FC,  // Center (not used)
-        SND_CHMAP_LFE, // Subwoofer (direct mapping)
-        SND_CHMAP_SL,  // Surround Left
-        SND_CHMAP_SR   // Surround Right
+    SND_CHMAP_FL,   // Front Left
+    SND_CHMAP_FR,   // Front Right
+    SND_CHMAP_RL,   // Rear Left
+    SND_CHMAP_RR,   // Rear Right
+    SND_CHMAP_FC,   // Center (not used)
+    SND_CHMAP_LFE,  // Subwoofer (direct mapping)
+    SND_CHMAP_SL,   // Surround Left
+    SND_CHMAP_SR    // Surround Right
 };
 
-snd_pcm_chmap_query_t **dxo_query_chmaps(snd_pcm_extplug_t *ext ATTRIBUTE_UNUSED)
+snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_extplug_t* ext ATTRIBUTE_UNUSED)
 {
-	auto maps = static_cast<snd_pcm_chmap_query_t**>(malloc(sizeof(snd_pcm_chmap_query_t*) * 2));
+  auto maps = static_cast<snd_pcm_chmap_query_t**>(malloc(sizeof(snd_pcm_chmap_query_t*) * 2));
 
-	if(!maps)
+  if(!maps)
   {
-		return nullptr;
+    return nullptr;
   }
 
   maps[0] = static_cast<snd_pcm_chmap_query_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + sizeof(kChannelMap)));
@@ -292,10 +239,10 @@ snd_pcm_chmap_query_t **dxo_query_chmaps(snd_pcm_extplug_t *ext ATTRIBUTE_UNUSED
   maps[0]->map.channels = sizeof(kChannelMap);
   memcpy(maps[0]->map.pos, kChannelMap, sizeof(kChannelMap));
 
-	return maps;
+  return maps;
 }
 
-snd_pcm_chmap_t *dxo_get_chmap(snd_pcm_extplug_t *ext ATTRIBUTE_UNUSED)
+snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_extplug_t* ext ATTRIBUTE_UNUSED)
 {
   auto map = static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + sizeof(kChannelMap)));
 
@@ -308,14 +255,13 @@ snd_pcm_chmap_t *dxo_get_chmap(snd_pcm_extplug_t *ext ATTRIBUTE_UNUSED)
   return map;
 }
 
-static const snd_pcm_extplug_callback_t callbacks =
-{
-  .transfer = dxo_transfer,
-  .close = dxo_close,
-	.init = dxo_init,
+static const snd_pcm_extplug_callback_t callbacks = {
+    .transfer = dxo_transfer,
+    .close = dxo_close,
+    .init = dxo_init,
 #if SND_PCM_EXTPLUG_VERSION >= 0x10002
-	.query_chmaps = dxo_query_chmaps,
-  .get_chmap = dxo_get_chmap,
+    .query_chmaps = dxo_query_chmaps,
+    .get_chmap = dxo_get_chmap,
 #endif
 };
 
@@ -326,12 +272,12 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   long int channels = 0;
   long int blockSize = 128;
   std::string coeffPath = "dxo";
-  snd_config_t *slaveConfig = 0;
+  snd_config_t* slaveConfig = 0;
 
   snd_config_for_each(i, next, conf)
   {
-    snd_config_t *config = snd_config_iterator_entry(i);
-    const char *id;
+    snd_config_t* config = snd_config_iterator_entry(i);
+    const char* id;
     snd_config_get_id(config, &id);
 
     std::string param(id);
@@ -356,7 +302,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
 
     if(param == "path")
     {
-      const char *path;
+      const char* path;
       snd_config_get_string(config, &path);
       coeffPath = path;
       continue;
@@ -368,15 +314,12 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  AlsaPluginDxO *plugin = new AlsaPluginDxO();
+  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize);
 
   plugin->callback = &callbacks;
   plugin->version = SND_PCM_EXTPLUG_VERSION;
   plugin->name = "dxo";
   plugin->private_data = plugin;
-
-  //plugin->blockSize_ = blockSize;
-  //plugin->coeffPath_=coeffPath;
 
   snd_output_stdio_attach(&(plugin->output_), stdout, 0);
   snd_output_printf(plugin->output_, "slave: %d\n", (slaveConfig));
@@ -393,8 +336,9 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   static uint32_t formats[] = {SND_PCM_FORMAT_S16_LE, SND_PCM_FORMAT_S32_LE};
 
   snd_pcm_extplug_set_param_minmax(plugin, SND_PCM_EXTPLUG_HW_CHANNELS, 2, 3);
-  snd_pcm_extplug_set_param_list(plugin, SND_PCM_EXTPLUG_HW_FORMAT, sizeof(formats) / sizeof(formats[0]), formats);
-  
+  snd_pcm_extplug_set_param_list(
+      plugin, SND_PCM_EXTPLUG_HW_FORMAT, sizeof(formats) / sizeof(formats[0]), formats);
+
   if(snd_pcm_extplug_set_slave_param(plugin, SND_PCM_EXTPLUG_HW_FORMAT, SND_PCM_FORMAT_S32_LE) < 0)
   {
     return -EINVAL;
@@ -414,19 +358,4 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
 }
 
 SND_PCM_PLUGIN_SYMBOL(dxo);
-
 }
-/*
-int main()
-{
-    const int N = 1024;
-    fftwf_complex *in, *out;
-    fftwf_plan p;
-    in = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-    out = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * N);
-    p = fftwf_plan_dft_1d(N, in, out, FFTW_FORWARD, FFTW_ESTIMATE);
-    fftwf_execute(p);
-    fftwf_destroy_plan(p);
-    fftwf_free(in); fftwf_free(out);
-  return 0;
-}*/

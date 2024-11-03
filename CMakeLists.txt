@@ -17,7 +17,6 @@ SET(CMAKE_CXX_FLAGS "-g -O0 -fPIC -fpermissive")
 # -O3 -mcpu=armv7-a -ftree-vectorize -mfloat-abi=hard -mfpu=neon-vfpv4
 
 # SET(CMAKE_C_FLAGS "-O2 -fPIC")
-
 # add_definitions(-fPIC)
 find_library(ALSA_LIB asound)
 
@@ -39,7 +38,9 @@ include(ExternalProject)
 ExternalProject_Add(
   fftw3
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10
-  CONFIGURE_COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --enable-static --disable-shared --enable-float --disable-fortran # --host=arm --enable-neon
+  CONFIGURE_COMMAND
+  ${CMAKE_COMMAND} -E env "CFLAGS=-fPIC -O3 -fomit-frame-pointer -mtune=native -malign-double -fstrict-aliasing -fno-schedule-insns"
+  ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --enable-static --disable-shared --enable-float --disable-fortran # --host=arm --enable-neon --enable-armv7a-cntvct
   BUILD_COMMAND make && make install
   BUILD_IN_SOURCE 0
 )
@@ -61,7 +62,7 @@ install(TARGETS DxO DESTINATION /)
 
 # Unit Tests
 enable_testing()
-add_executable(TestingX tests.cpp tasks/test.cpp filter/test.cpp)
+add_executable(TestingX tests.cpp tasks/test.cpp crossover/test.cpp)
 add_dependencies(TestingX DxO)
 target_link_directories(TestingX PUBLIC fftw3f/lib)
 target_link_libraries(TestingX gtest_main asound libfftw3f.a)

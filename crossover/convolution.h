@@ -3,10 +3,8 @@
 #include <stdint.h>
 
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 #include <complex>
-#include <iostream>
 #include <list>
 #include <span>
 #include <vector>
@@ -83,12 +81,10 @@ public:
   Convolution(const std::span<const float>& h, uint32_t inputBlockSize)
       : subFilterSize_{inputBlockSize}, fftSize_{inputBlockSize + subFilterSize_}, inverseFft_{fftSize_}
   {
-    std::cout << "FFT SIZE " << (fftSize_) << std::endl;
-
     blockSize_ = fftSize_ / 2 + 1;
     numBlocks_ = (h.size() + subFilterSize_ - 1) / subFilterSize_;
     assert(numBlocks_ > 1 && "must be more than one block");
-    // assert(subFilterSize_ >= inputBlockSize && "subFilterSize must be greater than inputBlockSize");
+    //  assert(subFilterSize_ >= inputBlockSize && "subFilterSize must be greater than inputBlockSize");
     H_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
     delayLine_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
 
@@ -99,7 +95,7 @@ public:
     }
 
     ForwardFFT fft{fftSize_};
-    float* src = h.data();
+    const float* src = h.data();
     std::complex<float>* dst = H_;
     for(uint32_t i{0}; i < numBlocks_; ++i)
     {
@@ -148,12 +144,12 @@ public:
           memcpy(forwardFft->input_.data(), overlapBuffer.get(), (subFilterSize) * sizeof(float));
           x = forwardFft->input_.last(subFilterSize);
           memcpy(overlapBuffer.get(), x.data(), x.size() * sizeof(float));
-          std::cout << "input: " << std::endl;
+          /*std::cout << "input: " << std::endl;
           for(auto& i : forwardFft->input_)
           {
             std::cout << (i) << " ";
           }
-          std::cout << std::endl;
+          std::cout << std::endl;*/
           forwardFft->run();
 
           /*std::cout << "resul: " << std::endl;

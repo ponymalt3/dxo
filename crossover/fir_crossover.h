@@ -1,13 +1,11 @@
 #pragma once
 
-#include <fftw3.h>
 #include <stdint.h>
 
-#include <cassert>
-#include <complex>
-#include <iostream>
 #include <list>
+#include <vector>
 
+#include "../tasks/tasks.h"
 #include "convolution.h"
 
 using TaskType = std::shared_ptr<Task>;
@@ -34,7 +32,6 @@ public:
     std::vector<TaskType> finalDeps;
     for(auto& [inputChannel, h] : channelFilters)
     {
-      std::cout << "Input ch: " << (inputChannel) << std::endl;
       auto conv = std::make_unique<Convolution>(h, blockSize);
       auto [backgroundJobs, output] = conv->getOutputTasks(inputJobs_[inputChannel]);
 
@@ -57,7 +54,6 @@ public:
   void updateInputs()
   {
     runner_.run(inputJobs_);
-    std::cout << "OOOOO" << std::endl;
     runner_.run(backgroundJobs_, false);
   }
 
