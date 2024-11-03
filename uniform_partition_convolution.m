@@ -1,7 +1,7 @@
-hBlocks=2
-blockSize=4
-h=[1, -1, 2, 3, 5, 9, 0, 0]
-x=[3, -1, 0, 3, 2, 0, 1, 2]%, 1, 8, 8, 8, 1, 2, 3, 4]
+blockSize=2
+h=[-1.14, -0.08, 1.49, -0.79, -1.38, -4.73, 1.9, -4.41, 2.63, 4.26]
+hBlocks=length(h)/blockSize
+x=[3, -1, 0, 3, 2, 0, 1, 2, 1, 8, 8, 8, 1, 2, 3, 4]
 
 
 NFFT = blockSize * 2;
@@ -60,3 +60,5 @@ while endIdx <= length(x)
 end
 
 y
+
+conv = conv(h,x)
