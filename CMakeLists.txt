@@ -5,18 +5,17 @@ project(DxO VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include(FetchContent)
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
-)
-FetchContent_MakeAvailable(googletest)
-
+# include(FetchContent)
+# FetchContent_Declare(
+# googletest
+# URL "http://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip"
+# )
+# FetchContent_MakeAvailable(googletest)
 SET(CMAKE_CXX_FLAGS "-g -O0 -fPIC -fpermissive")
 
 # -O3 -mcpu=armv7-a -ftree-vectorize -mfloat-abi=hard -mfpu=neon-vfpv4
 
-# SET(CMAKE_C_FLAGS "-O2 -fPIC")
+# SET(CMAKE_C_FLAGS "-O3 -fPIC")
 # add_definitions(-fPIC)
 find_library(ALSA_LIB asound)
 
@@ -32,7 +31,12 @@ endif()
 # execute_process(COMMAND echo "blaaaa")
 # execute_process(COMMAND autoconf WORKING_DIRECTORY fftw3 OUTPUT_VARIABLE xxx)
 # execute_process(COMMAND "./fftw3/configure --prefix=${CMAKE_BINARY_DIR} --disable-shared --enable-static --enable-float --disable-fortran")
-message("xxxx ${xxx}")
+get_cmake_property(_variableNames VARIABLES)
+list(SORT _variableNames)
+
+foreach(_variableName ${_variableNames})
+  message(STATUS "${_variableName}=${${_variableName}}")
+endforeach()
 
 include(ExternalProject)
 ExternalProject_Add(
@@ -61,6 +65,7 @@ message(${CMAKE_BINARY_DIR})
 install(TARGETS DxO DESTINATION /)
 
 # Unit Tests
+add_subdirectory(googletest)
 enable_testing()
 add_executable(TestingX tests.cpp tasks/test.cpp crossover/test.cpp)
 add_dependencies(TestingX DxO)
