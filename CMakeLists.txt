@@ -17,20 +17,17 @@ if(NOT ALSA_LIB)
   message(FATAL_ERROR "ALSA library not found")
 endif()
 
-# get all python files excluding Mocks
-# file(GLOB PYTHON_FILES *.py)
-# list(FILTER PYTHON_FILES EXCLUDE REGEX ".*Mock.*")
-# list(APPEND PYTHON_FILES "${CMAKE_CURRENT_SOURCE_DIR}/Wrapper.pyx")
+# get_cmake_property(_variableNames VARIABLES)
+# list(SORT _variableNames)
 
-# execute_process(COMMAND echo "blaaaa")
-# execute_process(COMMAND autoconf WORKING_DIRECTORY fftw3 OUTPUT_VARIABLE xxx)
-# execute_process(COMMAND "./fftw3/configure --prefix=${CMAKE_BINARY_DIR} --disable-shared --enable-static --enable-float --disable-fortran")
-get_cmake_property(_variableNames VARIABLES)
-list(SORT _variableNames)
-
-foreach(_variableName ${_variableNames})
-  message(STATUS "${_variableName}=${${_variableName}}")
-endforeach()
+# foreach(_variableName ${_variableNames})
+# message(STATUS "${_variableName}=${${_variableName}}")
+# endforeach()
+if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm")
+  add_definitions(-DBUILD_ARM)
+  set(FFTW_CROSS_COMPLIE "--host=arm --enable-neon --enable-armv7a-cntvct")
+  message("BUILD FOR ARM")
+endif()
 
 include(ExternalProject)
 ExternalProject_Add(
@@ -38,7 +35,7 @@ ExternalProject_Add(
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10
   CONFIGURE_COMMAND
   ${CMAKE_COMMAND} -E env "CFLAGS=-fPIC -O3 -fomit-frame-pointer -mtune=native -malign-double -fstrict-aliasing -fno-schedule-insns"
-  ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --enable-static --disable-shared --enable-float --disable-fortran # --host=arm --enable-neon --enable-armv7a-cntvct
+  ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --enable-static --disable-shared --enable-float --disable-fortran ${FFTW_CROSS_COMPLIE}
   BUILD_COMMAND make && make install
   BUILD_IN_SOURCE 0
 )
