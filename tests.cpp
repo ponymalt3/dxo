@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <initializer_list>
-#include <iostream>
 #include <vector>
 
 #include "pcm_stream.h"
@@ -13,16 +12,16 @@ public:
   Channel(SampleType* addr, uint32_t size, uint32_t step)
   {
     this->addr = addr;
-    this->step = sizeof(SampleType) * 8 * step;
+    this->step = step * sizeof(SampleType) * 8;
+    this->first = 0;
   }
 
   void setData(uint32_t offset, std::initializer_list<SampleType> data)
   {
+    auto i{0};
     for(auto d : data)
     {
       reinterpret_cast<SampleType*>(addr)[offset * step / (sizeof(SampleType) * 8)] = d;
-      // std::cout<<"set "<<((void*)(reinterpret_cast<SampleType*>(addr)+(offset * step / (sizeof(SampleType)
-      // * 8))))<<" to "<<(d)<<std::endl;
       ++offset;
     }
   }
@@ -87,7 +86,7 @@ TEST_F(PcmStreamTest, Test_InterleavedExtract)
     c.setData(0, {i++, i++, i++, i++});
   }
 
-  PcmStream<int32_t> stream(&interleaved[0], 0);
+  PcmStream<int32_t> stream(interleaved.data(), 0);
   stream.extractInterleaved(4U, ch1, ch2, ch3, ch4, ch5, ch6, ch7, ch8);
 
   EXPECT_EQ(ch1[0], 0);
@@ -111,7 +110,7 @@ TEST_F(PcmStreamTest, Test_InterleavedLoad)
   float ch7[3] = {19.0f, 20.0f, 21.0f};
   float ch8[3] = {22.0f, 23.0f, 24.0f};
 
-  PcmStream<int32_t> stream(&interleaved[0], 0);
+  PcmStream<int32_t> stream(interleaved.data(), 0);
   stream.loadInterleaved(3U, ch1, ch2, ch3, ch4, ch5, ch6, ch7, ch8);
 
   EXPECT_EQ(interleaved[0].getData(0, 3), std::vector<int32_t>({1, 2, 3}));
