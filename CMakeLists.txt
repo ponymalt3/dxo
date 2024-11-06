@@ -5,7 +5,7 @@ project(DxO VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-SET(CMAKE_CXX_FLAGS "-g -O0 -fPIC -fpermissive")
+set(CMAKE_CXX_FLAGS "-g -O0 -fPIC -fpermissive")
 
 # -O3 -mcpu=armv7-a -ftree-vectorize -mfloat-abi=hard -mfpu=neon-vfpv4
 
@@ -17,29 +17,28 @@ if(NOT ALSA_LIB)
   message(FATAL_ERROR "ALSA library not found")
 endif()
 
-# get all python files excluding Mocks
-# file(GLOB PYTHON_FILES *.py)
-# list(FILTER PYTHON_FILES EXCLUDE REGEX ".*Mock.*")
-# list(APPEND PYTHON_FILES "${CMAKE_CURRENT_SOURCE_DIR}/Wrapper.pyx")
+# get_cmake_property(_variableNames VARIABLES)
+# list(SORT _variableNames)
 
-# execute_process(COMMAND echo "blaaaa")
-# execute_process(COMMAND autoconf WORKING_DIRECTORY fftw3 OUTPUT_VARIABLE xxx)
-# execute_process(COMMAND "./fftw3/configure --prefix=${CMAKE_BINARY_DIR} --disable-shared --enable-static --enable-float --disable-fortran")
-get_cmake_property(_variableNames VARIABLES)
-list(SORT _variableNames)
-
-foreach(_variableName ${_variableNames})
-  message(STATUS "${_variableName}=${${_variableName}}")
-endforeach()
+# foreach(_variableName ${_variableNames})
+# message(STATUS "${_variableName}=${${_variableName}}")
+# endforeach()
+if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm")
+  add_definitions(-DBUILD_ARM)
+  set(BUILD_ARM True)
+  set(FFTW_CROSS_COMPLIE "--host=arm --enable-neon --enable-armv7a-cntvct")
+  message("BUILD FOR ARM")
+endif()
 
 include(ExternalProject)
 ExternalProject_Add(
   fftw3
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10
   CONFIGURE_COMMAND
-  ${CMAKE_COMMAND} -E env "CFLAGS=-fPIC -O3 -fomit-frame-pointer -mtune=native -malign-double -fstrict-aliasing -fno-schedule-insns"
-  ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --enable-static --disable-shared --enable-float --disable-fortran # --host=arm --enable-neon --enable-armv7a-cntvct
-  BUILD_COMMAND make && make install
+
+  # ${CMAKE_COMMAND} -E env "CFLAGS=-fPIC -O3 -fomit-frame-pointer -mtune=native -malign-double -fstrict-aliasing -fno-schedule-insns"
+  ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --host=arm --enable-neon --enable-armv7a-cntvct --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --enable-static --disable-shared --enable-float --disable-fortran
+  BUILD_COMMAND make "CFLAGS=-fPIC -O3 -fomit-frame-pointer" && make install
   BUILD_IN_SOURCE 0
 )
 include_directories(fftw3f/include)
@@ -58,21 +57,25 @@ target_link_libraries(DxO asound dl libfftw3f.a)
 message(${CMAKE_BINARY_DIR})
 install(TARGETS DxO DESTINATION /)
 
-# Unit Tests
-enable_testing()
-option(INSTALL_GTEST OFF)
-option(GTEST_HAS_ABSL OFF)
-set(GOOGLETEST_VERSION 1.15.2)
-add_subdirectory(googletest)
+if(NOT BUILD_ARM)
+  # Unit Tests
+  enable_testing()
+  include(FetchContent)
+  FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+  )
+  FetchContent_MakeAvailable(googletest)
 
-add_executable(TestingX tests.cpp tasks/test.cpp crossover/test.cpp)
-add_dependencies(TestingX DxO)
-target_link_directories(TestingX PUBLIC fftw3f/lib)
-target_link_libraries(TestingX gtest_main asound libfftw3f.a)
+  add_executable(TestingX tests.cpp tasks/test.cpp crossover/test.cpp)
+  add_dependencies(TestingX DxO)
+  target_link_directories(TestingX PUBLIC fftw3f/lib)
+  target_link_libraries(TestingX gtest_main asound libfftw3f.a)
 
-add_test(NAME example_test COMMAND Testing)
-add_custom_command(
-  TARGET TestingX POST_BUILD
-  COMMAND TestingX --gtest_output=xml:Testing.xml
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
+  add_test(NAME example_test COMMAND Testing)
+  add_custom_command(
+    TARGET TestingX POST_BUILD
+    COMMAND TestingX --gtest_output=xml:Testing.xml
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+endif()
