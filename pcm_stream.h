@@ -10,19 +10,17 @@ class PcmStream
 public:
   PcmStream(const snd_pcm_channel_area_t* area, snd_pcm_uframes_t offset)
   {
-    area_ = area;
-    offset_ = offset;
+    addr_ = reinterpret_cast<SampleType*>(snd_pcm_channel_area_addr(area, offset));
+    step_ = snd_pcm_channel_area_step(area) / sizeof(SampleType);
+
+    assert((addr_ + 1) == snd_pcm_channel_area_addr(area + 1, offset) &&
+           "Channels must be stored interleaved");
   }
 
-  bool isLinear() const { return (area_[0].step / 8) == sizeof(SampleType); }
-
-  uint32_t calculateOffset(uint32_t offset) { return (area_->step / (sizeof(SampleType) * 8)) * offset; }
-
-  // protected:
   template <typename... Args>
   void extractInterleaved(uint32_t size, Args... args)
   {
-    auto* src = reinterpret_cast<SampleType*>(area_->addr);
+    auto* src = addr_;
     auto* srcMax = src + calculateOffset(size);
 
     while(src < srcMax)
@@ -30,22 +28,13 @@ public:
       ((*args++ = *src++), ...);
     }
 
-    offset_ += calculateOffset(size);
-  }
-
-  template <typename... Args>
-  void extractLinear(uint32_t size, Args... args)
-  {
-    uint32_t i = 0;
-    (copy(args, reinterpret_cast<SampleType>(area_[i++].addr) + calculateOffset(offset_), size), ...);
-
-    offset_ += calculateOffset(size);
+    addr_ = srcMax;
   }
 
   template <typename... Args>
   void loadInterleaved(uint32_t size, Args... args)
   {
-    auto* src = reinterpret_cast<SampleType*>(area_->addr);
+    auto* src = addr_;
     auto* srcMax = src + calculateOffset(size);
 
     while(src < srcMax)
@@ -53,29 +42,14 @@ public:
       ((*src++ = *args++), ...);
     }
 
-    offset_ += calculateOffset(size);
+    addr_ = srcMax;
   }
 
-  template <typename... Args>
-  void loadLinear(uint32_t size, Args... args)
-  {
-    auto* src = reinterpret_cast<SampleType*>(area_->addr);
-    uint32_t i = 0;
-    (copy(area_[i++].addr, args, size), ...);
-
-    offset_ += calculateOffset(size);
-  }
-
-  template <typename T1, typename T2>
-  void copy(T1* dst, const T2* src, uint32_t size)
-  {
-    auto srcMax = src + size;
-    while(src < srcMax)
-    {
-      *dst++ = *src++;
-    }
-  }
+protected:
+  uint32_t calculateOffset(uint32_t offset) { return step_ * offset; }
 
   const snd_pcm_channel_area_t* area_;
+  SampleType* addr_;
+  uint32_t step_;
   uint32_t offset_;
 };
