@@ -39,7 +39,6 @@ Makefile
 fftw3-prefix
 fftw3f
 
-googletest*
 _deps
 lib
 
