@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 FetchContent_Declare(
   googletest
-  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+  URL "http://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip"
 )
 FetchContent_MakeAvailable(googletest)
 
@@ -32,7 +32,12 @@ endif()
 # execute_process(COMMAND echo "blaaaa")
 # execute_process(COMMAND autoconf WORKING_DIRECTORY fftw3 OUTPUT_VARIABLE xxx)
 # execute_process(COMMAND "./fftw3/configure --prefix=${CMAKE_BINARY_DIR} --disable-shared --enable-static --enable-float --disable-fortran")
-message("xxxx ${xxx}")
+get_cmake_property(_variableNames VARIABLES)
+list(SORT _variableNames)
+
+foreach(_variableName ${_variableNames})
+  message(STATUS "${_variableName}=${${_variableName}}")
+endforeach()
 
 include(ExternalProject)
 ExternalProject_Add(
