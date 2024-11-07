@@ -77,7 +77,7 @@ public:
     return static_cast<Task*>(node)->getSharedPointer();
   }
 
-  // protected:
+protected:
   Task(std::function<void(Task&)> task,
        const std::vector<std::shared_ptr<Task>>& dependencies,
        std::unique_ptr<Artifact> artifact)
@@ -192,7 +192,6 @@ protected:
           return;
         }
 
-        // std::cout << "Sleeping..." << std::endl;
         wait();
       }
       else

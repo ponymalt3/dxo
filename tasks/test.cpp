@@ -22,10 +22,6 @@ public:
   {
     result = src;
     std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
-    {
-      // std::lock_guard lock(GetMutex());
-      // std::cout<<"copy complete\n";
-    }
   }
 
   static void sum(Task& task, ArtifactType& result, uint32_t sleepMs = 0)
@@ -44,10 +40,6 @@ public:
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
-    {
-      // std::lock_guard lock(GetMutex());
-      // std::cout<<"sum complete "<<(result[0])<<"\n";
-    }
   }
 
   TaskRunner runner_{3};

@@ -57,13 +57,13 @@ public:
     runner_.run(backgroundJobs_, false);
   }
 
-  const std::span<float>& getInputBuffer(uint32_t inputChannel) const
+  const RealData& getInputBuffer(uint32_t inputChannel) const
   {
     assert(inputChannel < inputBuffer_.size());
     return inputBuffer_[inputChannel];
   }
 
-  const std::span<float>& getOutputBuffer(uint32_t outputChannel) const
+  const RealData& getOutputBuffer(uint32_t outputChannel) const
   {
     assert(outputChannel < outputBuffer_.size());
     return outputBuffer_[outputChannel];
@@ -73,7 +73,7 @@ protected:
   TaskRunner runner_;
   std::vector<TaskType> inputJobs_;
   std::vector<TaskType> backgroundJobs_;
-  std::vector<std::span<float>> inputBuffer_;
-  std::vector<std::span<float>> outputBuffer_;
+  std::vector<RealData> inputBuffer_;
+  std::vector<RealData> outputBuffer_;
   std::list<std::unique_ptr<Convolution>> convolutions_;
 };

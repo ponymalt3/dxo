@@ -43,3 +43,6 @@ _deps
 lib
 
 CTestTestfile.cmake
+
+TestingX
+Testing.xml
