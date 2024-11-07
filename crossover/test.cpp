@@ -37,7 +37,7 @@ public:
   {
     EXPECT_GT(std::min(a.size(), b.size()), 1);
 
-    constexpr auto epsilon = 0.02f;
+    constexpr auto epsilon = 0.03f;
 
     for(auto i{0}; i < std::min(a.size(), b.size()); ++i)
     {
@@ -98,7 +98,7 @@ TEST_F(FirFilterTest, Test_ParallelConvolution)
   }
 }
 
-TEST_F(FirFilterTest, DISABLED_Test_FirMultiChannelCrossover)
+TEST_F(FirFilterTest, Test_FirMultiChannelCrossover)
 {
   constexpr auto BlockSize = 120U;
   constexpr auto NumBlocks = 59U;

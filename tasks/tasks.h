@@ -144,12 +144,13 @@ public:
       }
     }
 
-    incrementState();
+    restartWorker();
+
     if(finalTask_ && wait)
     {
       threadRun(true);
       finalTaskReady_.acquire();
-      finalTask_->execute(nullptr);  //[](std::shared_ptr<Task>) {});
+      finalTask_->execute(nullptr);
       finalTask_ = nullptr;
     }
 
@@ -157,27 +158,29 @@ public:
   }
 
 protected:
-  void incrementState(uint32_t increment = 1)
+  void restartWorker(bool all = true)
   {
+    if(all)
     {
-      std::unique_lock lock(mutex_);
-      state_ += increment;
+      cv_.notify_all();
     }
-    cv_.notify_one();
+    else
+    {
+      cv_.notify_one();
+    }
   }
 
-  uint32_t waitFor(uint32_t state)
+  void wait()
   {
     std::unique_lock lock(mutex_);
-    cv_.wait(lock, [this, state] { return state_ >= state; });
-    return state_;
+    cv_.wait(lock);
   }
 
   void threadRun(bool master)
   {
     uint64_t state{1};
 
-    waitFor(state);
+    wait();
     while(!stop_.load())
     {
       auto task = activeTasks_.pop();
@@ -190,17 +193,17 @@ protected:
         }
 
         // std::cout << "Sleeping..." << std::endl;
-        waitFor(++state);
+        wait();
       }
       else
       {
-        bool restartWorker = false;
-        Task::fromNode(task)->execute([this, &restartWorker](std::shared_ptr<Task> task) {
+        auto listWasEmpty = false;
+        Task::fromNode(task)->execute([this, &listWasEmpty](std::shared_ptr<Task> task) {
           if(!task->isFinal())
           {
             if(activeTasks_.push(task.get()))
             {
-              restartWorker = true;
+              listWasEmpty = true;
             }
           }
           else
@@ -209,10 +212,10 @@ protected:
           }
         });
 
-        if(restartWorker)
+        if(listWasEmpty)
         {
           // restart worker
-          incrementState();
+          restartWorker();
         }
       }
     }

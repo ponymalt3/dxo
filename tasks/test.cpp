@@ -54,7 +54,7 @@ public:
   std::vector<std::shared_ptr<Task>> tasks_;
 };
 
-TEST_F(TaskTest, Test_TasksumningOrder)
+TEST_F(TaskTest, Test_TaskRunningOrder)
 {
   std::array<ArtifactType, 30> inputs;
 
