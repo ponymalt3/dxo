@@ -8,6 +8,12 @@ template <typename SampleType>
 class PcmStream
 {
 public:
+  PcmStream(SampleType* data, uint32_t step)
+  {
+    addr_ = data;
+    step_ = step;
+  }
+
   PcmStream(const snd_pcm_channel_area_t* area, snd_pcm_uframes_t offset)
   {
     addr_ = reinterpret_cast<SampleType*>(snd_pcm_channel_area_addr(area, offset));
