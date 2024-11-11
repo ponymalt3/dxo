@@ -230,7 +230,7 @@ public:
     auto combine = Task::create<ComplexData>(
         [this](Task& task) {
           auto result = task.getArtifact<ComplexData>().data();
-          for(auto& x : std::span(H_, blockSize_))
+          for(auto& _ : std::span(H_, blockSize_))
           {
             multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
             add(result, result, task.getDependencies()[1]->getArtifact<ComplexVec>().data(), blockSize_);

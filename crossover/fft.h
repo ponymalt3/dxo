@@ -46,6 +46,7 @@ public:
     plan_ = fftwf_plan_dft_c2r_1d(
         size, reinterpret_cast<fftwf_complex*>(input_.data()), output_.data(), FFTW_MEASURE);
   }
+
   ~BackwardFFT()
   {
     fftwf_destroy_plan(plan_);

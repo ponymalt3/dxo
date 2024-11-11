@@ -20,7 +20,7 @@ class AlsaPluginDxO : public snd_pcm_ioplug_t
 public:
   enum
   {
-    kNumOutputChannels = 2,
+    kNumOutputChannels = 8,
     kNumPeriods = 4
   };
 
@@ -138,25 +138,25 @@ public:
       {
         // memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
         // memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
+        // snd_pcm_areas_copy(dst_areas, dst_offset, src_areas, src_offset, 2, blockSize_, 2);
 
         crossover_->updateInputs();
 
         dst.loadInterleaved(blockSize_,
-                          outputs_[0],
-                          outputs_[1]/*,
-                          outputs_[2],
-                          outputs_[3],
-                          outputs_[0],  // unused
-                          outputs_[6],
-                          outputs_[4],
-                          outputs_[5]*/);
+                            outputs_[0],
+                            outputs_[1],
+                            outputs_[2],
+                            outputs_[3],
+                            outputs_[0],  // unused
+                            outputs_[6],
+                            outputs_[4],
+                            outputs_[5]);
 
         syncOutputBuffer();
 
         inputOffset_ = 0;
         dst = PcmStream<int16_t>{outputBuffer_.get(), kNumOutputChannels};
       }
-      // snd_pcm_areas_copy(dst_areas, dst_offset, src_areas, src_offset, 2, blockSize_, 2);
     }
 
     streamPos_ += size;
@@ -235,7 +235,6 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
 int dxo_prepare(snd_pcm_ioplug_t* ext)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
-  snd_output_printf(plugin->output_, "dxo_prepare");
 
   if(snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
   {
@@ -255,12 +254,12 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     snd_output_printf(plugin->output_, "Can't set format.");
   }
 
-  if(snd_pcm_hw_params_set_channels(plugin->pcm_, plugin->params_, 2) < 0)
+  if(snd_pcm_hw_params_set_channels(plugin->pcm_, plugin->params_, AlsaPluginDxO::kNumOutputChannels) < 0)
   {
     snd_output_printf(plugin->output_, "Can't set channels number.");
   }
 
-  uint32_t rate = 44100;
+  uint32_t rate = plugin->rate;
   if(snd_pcm_hw_params_set_rate_near(plugin->pcm_, plugin->params_, &rate, 0) < 0)
   {
     snd_output_printf(plugin->output_, "Can't set rate.");
@@ -281,14 +280,6 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
   {
     snd_output_printf(plugin->output_, "Can't set harware parameters.");
   }
-
-  snd_pcm_uframes_t frames;
-  snd_pcm_hw_params_get_buffer_size(plugin->params_, &frames);
-  snd_output_printf(plugin->output_, "Buffer size: %lu", frames);
-
-  uint32_t tmp;
-  snd_pcm_hw_params_get_period_time(plugin->params_, &tmp, NULL);
-  snd_output_printf(plugin->output_, "Period time: %lu", tmp);
 
   snd_output_flush(plugin->output_);
 
@@ -454,7 +445,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   static constexpr uint32_t supportedAccess[] = {SND_PCM_ACCESS_RW_INTERLEAVED};
   static constexpr uint32_t supportedFormats[] = {SND_PCM_FORMAT_S16_LE, SND_PCM_FORMAT_S32_LE};
   static constexpr uint32_t supportedPeriodSize[] = {
-      128 * 2, 256 * 2, 512 * 2, 1024 * 2, 128 * 3, 256 * 3, 512 * 3, 1024 * 3};
+      128 * 4, 256 * 4, 512 * 4, 1024 * 4, 128 * 6, 256 * 6, 512 * 6, 1024 * 6};
 
   if(snd_pcm_ioplug_set_param_list(
          plugin, SND_PCM_IOPLUG_HW_ACCESS, std::size(supportedAccess), supportedAccess) < 0)

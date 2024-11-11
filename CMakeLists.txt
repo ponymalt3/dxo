@@ -20,8 +20,6 @@ endif()
 add_compile_options(-fPIC -ftree-vectorize)
 add_compile_definitions(PIC)
 
-message("CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
-
 include(ExternalProject)
 
 if(BUILD_ARM)

@@ -14,7 +14,7 @@ class FirMultiChannelCrossover
 {
 public:
   using ArtifactType = std::vector<fftw_complex>;
-  using ConfigType = std::pair<uint32_t, std::vector<float>>;
+  using ConfigType = std::pair<uint32_t, RealData>;
 
   FirMultiChannelCrossover(uint32_t blockSize,
                            uint32_t numInputChannels,
@@ -22,7 +22,7 @@ public:
                            uint32_t threads = 3)
       : runner_{threads}
   {
-    for(uint32_t i{0}; i < numInputChannels; ++i)
+    for(auto i{0}; i < numInputChannels; ++i)
     {
       auto [inputJob, input] = Convolution::getInputTask(blockSize);
       inputJobs_.push_back(inputJob);
