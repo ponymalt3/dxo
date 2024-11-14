@@ -480,7 +480,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_RATE, 44100, 48000) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_RATE, 48000, 48000) < 0)
   {
     std::cout << "Error SND_PCM_IOPLUG_HW_RATE failed" << std::endl;
     return -EINVAL;
