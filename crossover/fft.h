@@ -19,7 +19,7 @@ public:
     plan_ = fftwf_plan_dft_r2c_1d(size,
                                   input_.data(),
                                   reinterpret_cast<fftwf_complex*>(output_.data()),
-                                  FFTW_ESTIMATE);  // measure ? FFTW_MEASURE : FFTW_ESTIMATE);
+                                  measure ? FFTW_MEASURE : FFTW_ESTIMATE);
   }
 
   ~ForwardFFT()
@@ -44,7 +44,7 @@ public:
         output_{new(std::align_val_t(64)) float[size], size}
   {
     plan_ = fftwf_plan_dft_c2r_1d(
-        size, reinterpret_cast<fftwf_complex*>(input_.data()), output_.data(), FFTW_ESTIMATE);
+        size, reinterpret_cast<fftwf_complex*>(input_.data()), output_.data(), FFTW_MEASURE);
   }
 
   ~BackwardFFT()
