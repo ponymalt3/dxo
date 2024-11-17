@@ -27,7 +27,7 @@ if(BUILD_ARM)
     fftw3
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10
     CONFIGURE_COMMAND
-    ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --host=arm --enable-neon --enable-static --disable-shared --enable-float --disable-fortran
+    ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --host=arm --enable-neon --enable-armv7a-cntvct --enable-static --disable-shared --enable-float --disable-fortran
     BUILD_COMMAND make "CFLAGS=-fPIC -O3 ${CMAKE_C_FLAGS}" && make install
     BUILD_IN_SOURCE 0
   )
@@ -47,16 +47,11 @@ include_directories(fftw3f/include)
 add_library(DxO SHARED alsa_plugin.cpp)
 add_dependencies(DxO fftw3)
 
-add_executable(Dummy main.cpp)
-target_link_libraries(Dummy dl)
-install(TARGETS Dummy DESTINATION "")
-
 # set_target_properties(DxO PROPERTIES VERSION ${PROJECT_VERSION})
 # set_target_properties(DxO PROPERTIES SOVERSION ${PROJECT_VERSION_MAJOR})
 set_target_properties(DxO PROPERTIES OUTPUT_NAME "asound_module_pcm_dxo")
 target_link_directories(DxO PUBLIC fftw3f/lib)
 target_link_libraries(DxO asound dl libfftw3f.a)
-message("BINARY_DIR: ${CMAKE_BINARY_DIR}")
 install(TARGETS DxO DESTINATION "")
 
 # Unit Tests

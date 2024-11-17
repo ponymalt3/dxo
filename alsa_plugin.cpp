@@ -261,8 +261,6 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     }
   }
 
-  std::cout << "Open ok!" << std::endl;
-
   snd_pcm_hw_params_alloca(&(plugin->params_));
   snd_pcm_hw_params_any(plugin->pcm_, plugin->params_);
 
@@ -270,8 +268,6 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
   {
     std::cout << "Can't set interleaved mode." << std::endl;
   }
-
-  std::cout << "snd_pcm_hw_params_set_access ok!" << std::endl;
 
   if(snd_pcm_hw_params_set_format(plugin->pcm_, plugin->params_, SND_PCM_FORMAT_S16_LE) < 0)
   {
@@ -312,18 +308,91 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     std::cout << "Can't set harware parameters." << std::endl;
     snd_pcm_close(plugin->pcm_);
     plugin->pcm_ = nullptr;
-    return 0;
+    return -1;
   }
-
-  std::cout << "snd_pcm_hw_params OKKKK!" << std::endl;
 
   snd_pcm_uframes_t periodSize{0};
   int dir{0};
   snd_pcm_hw_params_get_period_size(plugin->params_, &periodSize, &dir);
   auto periods{0U};
   snd_pcm_hw_params_get_periods(plugin->params_, &periods, &dir);
+  /*snd_pcm_uframes_t bufferSize, bufferSizeMin, bufferSizeMax;
+  snd_pcm_hw_params_get_buffer_size(plugin->params_, &bufferSize);
+  snd_pcm_hw_params_get_buffer_size_min(plugin->params_, &bufferSizeMin);
+  snd_pcm_hw_params_get_buffer_size_max(plugin->params_, &bufferSizeMax);
+  std::cout << "XXX:\n  BufferSize: " << (bufferSize) << "\n  BufferSizeMin: " << (bufferSizeMin)
+            << "\n  BufferSizeMax: " << (bufferSizeMax) << std::endl;
 
-  std::cout << "HW:\n  PeriodSize: " << (periodSize) << "\n  Periods: " << (periods) << std::endl;
+  uint32_t periods, periodsMin, periodsMax;
+  snd_pcm_hw_params_get_periods(plugin->params_, &periods, nullptr);
+  snd_pcm_hw_params_get_periods_min(plugin->params_, &periodsMin, nullptr);
+  snd_pcm_hw_params_get_periods_max(plugin->params_, &periodsMax, nullptr);
+
+  std::cout << "HW:\n  PeriodSize: " << (periodSize) << "\n  Periods: " << (periods)
+            << "\n  PeriodsMin: " << (periodsMin) << "\n  PeriodsMax: " << (periodsMax) << std::endl;*/
+
+  /* if(snd_pcm_hw_params_set_buffer_size(plugin->pcm_, plugin->params_, bufferSizeMax) < 0)
+   {
+     std::cout << "Can't set buffer size33." << std::endl;
+   }
+
+   if(snd_pcm_hw_params_set_periods(plugin->pcm_, plugin->params_, periodsMax, 0) < 0)
+   {
+     snd_output_printf(plugin->output_, "Can't set period size22.");
+   }*/
+
+  snd_pcm_sw_params_t* sw_params;
+  auto rc = snd_pcm_sw_params_malloc(&sw_params);
+  if(rc < 0)
+  {
+    fprintf(stderr, "cannot allocate software parameters structure (%s)\n", snd_strerror(rc));
+    snd_pcm_close(plugin->pcm_);
+    return (-1);
+  }
+
+  rc = snd_pcm_sw_params_current(plugin->pcm_, sw_params);
+  if(rc < 0)
+  {
+    fprintf(stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(rc));
+    snd_pcm_close(plugin->pcm_);
+    return (-1);
+  }
+
+  snd_pcm_uframes_t thres = {0};
+  if(snd_pcm_sw_params_get_start_threshold(sw_params, &thres) < 0)
+  {
+    fprintf(stderr, "Error setting start threshold\n");
+    snd_pcm_close(plugin->pcm_);
+    return -1;
+  }
+
+  std::cout << "Thres: " << (thres) << std::endl;
+
+  snd_pcm_uframes_t startThreshold{std::max<snd_pcm_uframes_t>(((95 * periods) / 100) * periodSize, 1U)};
+  std::cout << "startThreshold: " << (startThreshold) << std::endl;
+  if(snd_pcm_sw_params_set_start_threshold(plugin->pcm_, sw_params, startThreshold) < 0)
+  {
+    fprintf(stderr, "Error setting start threshold\n");
+    snd_pcm_close(plugin->pcm_);
+    return -1;
+  }
+
+  snd_pcm_uframes_t stopThreshold{0};
+  if(snd_pcm_sw_params_set_stop_threshold(plugin->pcm_, sw_params, stopThreshold) < 0)
+  {
+    fprintf(stderr, "Error setting stop threshold\n");
+    snd_pcm_close(plugin->pcm_);
+    return -1;
+  }
+
+  if((rc = snd_pcm_sw_params(plugin->pcm_, sw_params)) < 0)
+  {
+    fprintf(stderr, "cannot set software parameters (%s)\n", snd_strerror(rc));
+    snd_pcm_close(plugin->pcm_);
+    return (-1);
+  }
+
+  snd_pcm_sw_params_free(sw_params);
 
   return 0;
 }
