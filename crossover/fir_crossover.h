@@ -22,9 +22,11 @@ public:
                            uint32_t threads = 3)
       : runner_{threads}
   {
+    std::cout << "Threads ok!" << std::endl;
     for(auto i{0}; i < numInputChannels; ++i)
     {
       auto [inputJob, input] = Convolution::getInputTask(blockSize);
+      std::cout << "getInputTask ok!" << std::endl;
       inputJobs_.push_back(inputJob);
       inputBuffer_.push_back(input);
     }
@@ -32,8 +34,11 @@ public:
     std::vector<TaskType> finalDeps;
     for(auto& [inputChannel, h] : channelFilters)
     {
+      std::cout << "try create Convolution";
       auto conv = std::make_unique<Convolution>(h, blockSize);
+      std::cout << " ok!" << std::endl;
       auto [backgroundJobs, output] = conv->getOutputTasks(inputJobs_[inputChannel]);
+      std::cout << "getOutputTasks ok!" << std::endl;
 
       outputBuffer_.push_back(output);
       assert(backgroundJobs[1]->isFinal() && "Task must be a final task");
@@ -45,8 +50,10 @@ public:
     // combine final jobs into one
     auto combined = Task::create<int>([](Task&) {}, finalDeps);
     backgroundJobs_.push_back(combined);
+    std::cout << "combined task ok!" << std::endl;
 
     runner_.run(backgroundJobs_, false);
+    std::cout << "start running ok!" << std::endl;
   }
 
   ~FirMultiChannelCrossover() { fftwf_cleanup(); }

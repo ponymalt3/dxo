@@ -21,7 +21,7 @@ public:
   enum
   {
     kNumOutputChannels = 8,
-    kNumPeriods = 4
+    kNumPeriods = 50
   };
 
   AlsaPluginDxO(const std::string& path, uint32_t blockSize)
@@ -29,11 +29,12 @@ public:
         inputs_(3),
         outputs_(7),
         inputOffset_(0),
-        outputBuffer_{new(std::align_val_t(64)) int16_t[kNumOutputChannels * blockSize_ * kNumPeriods]}
+        outputBuffer_{new(std::align_val_t(64)) int16_t[kNumOutputChannels * blockSize_ * 1]}
   {
     memset(this, 0, sizeof(snd_pcm_ioplug_t));
 
     auto coeffs = loadFIRCoeffs(path);
+    std::cout << "coeffs: " << (coeffs.size()) << std::endl;
     assert(coeffs.size() == 7 && "Coeffs file need to provide 7 FIR transfer functions");
 
     std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
@@ -43,6 +44,8 @@ public:
                                                              {1, coeffs[4]},
                                                              {1, coeffs[5]},
                                                              {2, coeffs[6]}};
+
+    std::cout << "create Crossover: " << std::endl;
 
     crossover_ = std::make_unique<FirMultiChannelCrossover>(blockSize_, 3, config, 2);
 
@@ -55,6 +58,8 @@ public:
     {
       outputs_[i] = crossover_->getOutputBuffer(i).data();
     }
+
+    std::cout << "Plugin created" << std::endl;
   }
 
   ~AlsaPluginDxO() {}
@@ -109,12 +114,15 @@ public:
   template <bool _HasLfeChannel, typename _InputSampleType>
   uint32_t update(PcmStream<_InputSampleType>& src, uint32_t size)
   {
+    // std::cout << "Update " << (size) << std::endl;
+
     PcmStream<int16_t> dst{outputBuffer_.get(), kNumOutputChannels};
 
     auto i{0U};
     while(i < size)
     {
       uint32_t segmentSize = std::min(size - i, blockSize_ - inputOffset_);
+      // std::cout << " Segment " << (segmentSize) << std::endl;
 
       if(_HasLfeChannel)
       {
@@ -123,6 +131,8 @@ public:
       }
       else
       {
+        // std::cout << "  two channels" << std::endl;
+
         src.extractInterleaved(segmentSize, inputs_[0] + inputOffset_, inputs_[1] + inputOffset_);
 
         for(auto j{inputOffset_}; j < inputOffset_ + segmentSize; ++j)
@@ -136,11 +146,11 @@ public:
 
       if(inputOffset_ == blockSize_)
       {
-        // memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
-        // memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
+        memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
+        memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
         // snd_pcm_areas_copy(dst_areas, dst_offset, src_areas, src_offset, 2, blockSize_, 2);
 
-        crossover_->updateInputs();
+        // crossover_->updateInputs();
 
         dst.loadInterleaved(blockSize_,
                             outputs_[0],
@@ -167,25 +177,27 @@ public:
   {
     auto result = snd_pcm_writei(pcm_, outputBuffer_.get(), blockSize_);
 
-    if(result == -EPIPE)
+    if(result < 0)
     {
-      snd_output_printf(output_, "underflow\n");  // snd_strerror(result));
-      snd_output_flush(output_);
+      // snd_output_printf(output_, "underflow\n");  // snd_strerror(result));
+      // snd_output_flush(output_);
+      std::cout << "SyncOutputBuffer error: " << (snd_strerror(result)) << std::endl;
+      snd_pcm_recover(pcm_, result, 0);
     }
 
     return result == blockSize_;
   }
 
   uint32_t blockSize_{128};
-  std::vector<float*> inputs_;
-  std::vector<float*> outputs_;
-  uint32_t inputOffset_;
+  std::vector<float*> inputs_{nullptr};
+  std::vector<float*> outputs_{nullptr};
+  uint32_t inputOffset_{0};
   snd_output_t* output_{nullptr};
   std::unique_ptr<FirMultiChannelCrossover> crossover_;
-  snd_pcm_t* pcm_;
-  snd_pcm_hw_params_t* params_;
+  snd_pcm_t* pcm_{nullptr};
+  snd_pcm_hw_params_t* params_{nullptr};
   std::unique_ptr<int16_t[]> outputBuffer_;
-  std::string pcmName_;
+  std::string pcmName_{};
   uint32_t streamPos_{0};
 };
 
@@ -194,6 +206,8 @@ extern "C" {
 snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  // std::cout << "dxo_pointer " << (plugin->streamPos_ % (plugin->buffer_size / 2)) << std::endl;
+
   return plugin->streamPos_ % (plugin->buffer_size / 2);
 }
 
@@ -234,54 +248,82 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
 
 int dxo_prepare(snd_pcm_ioplug_t* ext)
 {
+  std::cout << "dxo_prepare" << std::endl;
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
 
   if(snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
   {
     snd_output_printf(plugin->output_, "Can't open device.");
+
+    if(snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
+    {
+      return -EBUSY;
+    }
   }
+
+  std::cout << "Open ok!" << std::endl;
 
   snd_pcm_hw_params_alloca(&(plugin->params_));
   snd_pcm_hw_params_any(plugin->pcm_, plugin->params_);
 
   if(snd_pcm_hw_params_set_access(plugin->pcm_, plugin->params_, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
   {
-    snd_output_printf(plugin->output_, "Can't set interleaved mode.");
+    std::cout << "Can't set interleaved mode." << std::endl;
   }
+
+  std::cout << "snd_pcm_hw_params_set_access ok!" << std::endl;
 
   if(snd_pcm_hw_params_set_format(plugin->pcm_, plugin->params_, SND_PCM_FORMAT_S16_LE) < 0)
   {
-    snd_output_printf(plugin->output_, "Can't set format.");
+    std::cout << "Can't set format." << std::endl;
   }
 
   if(snd_pcm_hw_params_set_channels(plugin->pcm_, plugin->params_, AlsaPluginDxO::kNumOutputChannels) < 0)
   {
-    snd_output_printf(plugin->output_, "Can't set channels number.");
+    std::cout << "Can't set channels number." << std::endl;
   }
 
   uint32_t rate = plugin->rate;
+  std::cout << "rate: " << (rate) << std::endl;
   if(snd_pcm_hw_params_set_rate_near(plugin->pcm_, plugin->params_, &rate, 0) < 0)
   {
-    snd_output_printf(plugin->output_, "Can't set rate.");
+    std::cout << "Can't set rate." << std::endl;
   }
 
-  if(snd_pcm_hw_params_set_period_size(plugin->pcm_, plugin->params_, plugin->blockSize_, 0) < 0)
+  /*if(snd_pcm_hw_params_set_period_size(plugin->pcm_, plugin->params_, plugin->blockSize_, 0) < 0)
   {
     snd_output_printf(plugin->output_, "Can't set period size.");
   }
 
-  if(snd_pcm_hw_params_set_buffer_size(
-         plugin->pcm_, plugin->params_, plugin->blockSize_ * AlsaPluginDxO::kNumPeriods) < 0)
+  int dir{0};
+  if(snd_pcm_hw_params_set_periods_min(plugin->pcm_, plugin->params_, 16U, &dir) < 0)
   {
     snd_output_printf(plugin->output_, "Can't set period size.");
   }
+
+  snd_pcm_uframes_t minBufferSize = plugin->blockSize_ * 128U;
+  if(snd_pcm_hw_params_set_buffer_size_min(plugin->pcm_, plugin->params_, &minBufferSize) < 0)
+  {
+    std::cout << "Can't set buffer size." << std::endl;
+  }*/
 
   if(snd_pcm_hw_params(plugin->pcm_, plugin->params_) < 0)
   {
-    snd_output_printf(plugin->output_, "Can't set harware parameters.");
+    std::cout << "Can't set harware parameters." << std::endl;
+    snd_pcm_close(plugin->pcm_);
+    plugin->pcm_ = nullptr;
+    return 0;
   }
 
-  snd_output_flush(plugin->output_);
+  std::cout << "snd_pcm_hw_params OKKKK!" << std::endl;
+
+  snd_pcm_uframes_t periodSize{0};
+  int dir{0};
+  snd_pcm_hw_params_get_period_size(plugin->params_, &periodSize, &dir);
+  auto periods{0U};
+  snd_pcm_hw_params_get_periods(plugin->params_, &periods, &dir);
+
+  std::cout << "HW:\n  PeriodSize: " << (periodSize) << "\n  Periods: " << (periods) << std::endl;
 
   return 0;
 }
@@ -290,9 +332,14 @@ int dxo_close(snd_pcm_ioplug_t* ext)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
 
-  snd_pcm_drain(plugin->pcm_);
-  snd_pcm_close(plugin->pcm_);
+  std::cout << "dxo_close!" << std::endl;
 
+  if(plugin->pcm_)
+  {
+    snd_pcm_drain(plugin->pcm_);
+    snd_pcm_close(plugin->pcm_);
+    plugin->pcm_ = nullptr;
+  }
   delete plugin;
 
   return 0;
@@ -369,6 +416,9 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   std::string slavePcm;
   snd_config_t* slaveConfig = nullptr;
 
+  snd_output_t* output;
+  snd_output_stdio_attach(&(output), stdout, 0);
+
   snd_config_iterator_t i, next;
   snd_config_for_each(i, next, conf)
   {
@@ -424,8 +474,8 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  snd_output_t* output;
-  snd_output_stdio_attach(&(output), stdout, 0);
+  // snd_output_t* output;
+  // snd_output_stdio_attach(&(output), stdout, 0);
 
   AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize);
   plugin->callback = &callbacks;
@@ -436,6 +486,8 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   plugin->pcmName_ = slavePcm;
 
   int32_t result = snd_pcm_ioplug_create(plugin, name, stream, mode);
+
+  std::cout << "snd_pcm_ioplug_create " << (result) << std::endl;
 
   if(result < 0)
   {
@@ -467,8 +519,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_list(
-         plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, std::size(supportedPeriodSize), supportedPeriodSize) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 16, 2 * 1024 * 1024) < 0)
   {
     std::cout << "Error SND_PCM_IOPLUG_HW_PERIOD_BYTES failed" << std::endl;
     return -EINVAL;
@@ -480,7 +531,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_RATE, 48000, 48000) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_RATE, 44100, 48000) < 0)
   {
     std::cout << "Error SND_PCM_IOPLUG_HW_RATE failed" << std::endl;
     return -EINVAL;
