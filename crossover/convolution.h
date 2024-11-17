@@ -144,9 +144,10 @@ public:
   Convolution(const std::span<const float>& h, uint32_t inputBlockSize)
       : subFilterSize_{inputBlockSize}, fftSize_{inputBlockSize + subFilterSize_}, inverseFft_{fftSize_}
   {
+    std::cout << "FFTs ok!" << std::endl;
+
     blockSize_ = fftSize_ / 2 + 1;
     numBlocks_ = (h.size() + subFilterSize_ - 1) / subFilterSize_;
-    assert(numBlocks_ > 1 && "Number of blocks must be greater than one");
 
     H_ = new(std::align_val_t(64))
         std::complex<float>[blockSize_ * numBlocks_];  // make each block cache line aligned
@@ -159,6 +160,8 @@ public:
     }
 
     transformFilterCoeffs(h);
+
+    std::cout << "transformFilterCoeffs ok!" << std::endl;
   }
 
   ~Convolution()
@@ -227,17 +230,35 @@ public:
           ComplexVec(blockSize_)));
     }
 
-    auto combine = Task::create<ComplexData>(
-        [this](Task& task) {
-          auto result = task.getArtifact<ComplexData>().data();
-          for(auto& _ : std::span(H_, blockSize_))
-          {
-            multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
-            add(result, result, task.getDependencies()[1]->getArtifact<ComplexVec>().data(), blockSize_);
-          }
-        },
-        {input, sumUpTasks.front()},
-        inverseFft_.input_.subspan(0));
+    TaskType combine = nullptr;
+    if(sumUpTasks.size() > 0)
+    {
+      combine = Task::create<ComplexData>(
+          [this](Task& task) {
+            auto result = task.getArtifact<ComplexData>().data();
+            for(auto& _ : std::span(H_, blockSize_))
+            {
+              multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
+              add(result, result, task.getDependencies()[1]->getArtifact<ComplexVec>().data(), blockSize_);
+            }
+          },
+          {input, sumUpTasks.front()},
+          inverseFft_.input_.subspan(0));
+    }
+    else
+    {
+      // just one block => no need to sum up blocks
+      combine = Task::create<ComplexData>(
+          [this](Task& task) {
+            auto result = task.getArtifact<ComplexData>().data();
+            for(auto& _ : std::span(H_, blockSize_))
+            {
+              multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
+            }
+          },
+          {input},
+          inverseFft_.input_.subspan(0));
+    }
 
     auto resultTask = Task::create<RealData>([this](Task& task) { inverseFft_.run(); },
                                              {combine, shift},
