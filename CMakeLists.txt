@@ -55,6 +55,9 @@ target_link_libraries(DxO asound dl libfftw3f.a)
 message(${CMAKE_BINARY_DIR})
 install(TARGETS DxO DESTINATION "")
 
+add_executable(Dummy main.cpp)
+target_link_libraries(Dummy dl)
+
 # Unit Tests
 if(NOT BUILD_ARM)
   include(FetchContent)
