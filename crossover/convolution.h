@@ -144,8 +144,6 @@ public:
   Convolution(const std::span<const float>& h, uint32_t inputBlockSize)
       : subFilterSize_{inputBlockSize}, fftSize_{inputBlockSize + subFilterSize_}, inverseFft_{fftSize_}
   {
-    std::cout << "FFTs ok!" << std::endl;
-
     blockSize_ = fftSize_ / 2 + 1;
     numBlocks_ = (h.size() + subFilterSize_ - 1) / subFilterSize_;
 
@@ -160,8 +158,6 @@ public:
     }
 
     transformFilterCoeffs(h);
-
-    std::cout << "transformFilterCoeffs ok!" << std::endl;
   }
 
   ~Convolution()
