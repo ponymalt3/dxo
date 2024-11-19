@@ -112,10 +112,6 @@ public:
   ~TaskRunner()
   {
     stop_.store(true);  // Signal threads to stop
-    {
-      std::unique_lock lock(mutex_);
-      state_ = 0xFFFFFFFF;
-    }
     cv_.notify_all();
 
     for(auto& worker : workers_)
@@ -222,7 +218,6 @@ protected:
 
   std::mutex mutex_;
   std::condition_variable cv_;
-  uint64_t state_{0U};
   ThreadSafeList activeTasks_;
   std::vector<std::thread> workers_;
   std::atomic<bool> stop_{false};
