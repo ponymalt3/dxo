@@ -17,7 +17,7 @@ if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm")
   set(BUILD_ARM True)
 endif()
 
-add_compile_options(-fPIC -ftree-vectorize)
+add_compile_options(-fPIC -ftree-vectorize -ffast-math -fopt-info-vec-optimized)
 add_compile_definitions(PIC)
 
 include(ExternalProject)
@@ -28,7 +28,7 @@ if(BUILD_ARM)
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10
     CONFIGURE_COMMAND
     ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --host=arm --enable-neon --enable-armv7a-cntvct --enable-static --disable-shared --enable-float --disable-fortran
-    BUILD_COMMAND make "CFLAGS=-fPIC -O3 ${CMAKE_C_FLAGS}" && make install
+    BUILD_COMMAND make "CFLAGS=-fPIC -ffast-math ${CMAKE_C_FLAGS}" && make install
     BUILD_IN_SOURCE 0
   )
 else()
@@ -36,7 +36,7 @@ else()
     fftw3
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10
     CONFIGURE_COMMAND
-    ${CMAKE_COMMAND} -E env "CFLAGS=-fPIC -O3"
+    ${CMAKE_COMMAND} -E env "CFLAGS=-fPIC -O3 -ffast-math"
     ${CMAKE_CURRENT_SOURCE_DIR}/fftw-3.3.10/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/fftw3f --enable-static --disable-shared --enable-float --disable-fortran
     BUILD_COMMAND make && make install
     BUILD_IN_SOURCE 0
