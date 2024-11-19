@@ -1,8 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <cstdlib>
 #include <initializer_list>
+#include <thread>
 #include <vector>
 
+#include "alsa_plugin.h"
 #include "pcm_stream.h"
 
 template <typename SampleType>
@@ -121,4 +125,60 @@ TEST_F(PcmStreamTest, Test_InterleavedLoad)
   EXPECT_EQ(interleaved[5].getData(0, 3), std::vector<int32_t>({16, 17, 18}));
   EXPECT_EQ(interleaved[6].getData(0, 3), std::vector<int32_t>({19, 20, 21}));
   EXPECT_EQ(interleaved[7].getData(0, 3), std::vector<int32_t>({22, 23, 24}));
+}
+
+class RingBufferTest : public testing::Test
+{
+public:
+  void sleepFor(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+};
+
+TEST_F(RingBufferTest, Test_ParallelRingBufferAccess)
+{
+  RingBuffer<uint32_t> buffers(13, 1);
+
+  std::vector<uint32_t> inputs(100);
+  std::vector<uint32_t> outputs(100);
+  for(auto& i : inputs)
+  {
+    i = std::rand() % 9999;
+  }
+
+  std::thread producer([&]() {
+    for(auto i : inputs)
+    {
+      sleepFor(std::rand() % 10);
+      buffers.getWriteBuffer()[0] = i;
+      buffers.writeComplete();
+    }
+  });
+  std::thread consumer([&]() {
+    for(auto& o : outputs)
+    {
+      o = buffers.getReadBuffer()[0];
+      buffers.readComplete();
+      sleepFor(std::rand() % 10);
+    }
+  });
+
+  if(producer.joinable())
+  {
+    producer.join();
+  }
+
+  if(consumer.joinable())
+  {
+    consumer.join();
+  }
+
+  uint32_t missmatches{0};
+  for(auto i{0}; i < inputs.size(); ++i)
+  {
+    if(inputs[i] != outputs[i])
+    {
+      ++missmatches;
+    }
+  }
+
+  EXPECT_EQ(missmatches, 0);
 }
