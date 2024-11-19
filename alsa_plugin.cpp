@@ -1,205 +1,9 @@
 
+#include "alsa_plugin.h"
+
 #include <alsa/asoundlib.h>
 #include <alsa/pcm_external.h>
 #include <stdint.h>
-
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <vector>
-
-#include "crossover/fir_crossover.h"
-#include "fftw3.h"
-#include "pcm_stream.h"
-
-class AlsaPluginDxO : public snd_pcm_ioplug_t
-{
-public:
-  enum
-  {
-    kNumOutputChannels = 8,
-    kNumPeriods = 50
-  };
-
-  AlsaPluginDxO(const std::string& path, uint32_t blockSize)
-      : blockSize_(blockSize),
-        inputs_(3),
-        outputs_(7),
-        inputOffset_(0),
-        outputBuffer_{new(std::align_val_t(64)) int16_t[kNumOutputChannels * blockSize_ * 1]}
-  {
-    memset(this, 0, sizeof(snd_pcm_ioplug_t));
-
-    auto coeffs = loadFIRCoeffs(path);
-    std::cout << "coeffs: " << (coeffs.size()) << std::endl;
-    assert(coeffs.size() == 7 && "Coeffs file need to provide 7 FIR transfer functions");
-
-    std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
-                                                             {0, coeffs[1]},
-                                                             {0, coeffs[2]},
-                                                             {1, coeffs[3]},
-                                                             {1, coeffs[4]},
-                                                             {1, coeffs[5]},
-                                                             {2, coeffs[6]}};
-
-    std::cout << "create Crossover: " << std::endl;
-
-    crossover_ = std::make_unique<FirMultiChannelCrossover>(blockSize_, 3, config, 2);
-
-    for(auto i{0}; i < inputs_.size(); ++i)
-    {
-      inputs_[i] = crossover_->getInputBuffer(i).data();
-    }
-
-    for(auto i{0}; i < outputs_.size(); ++i)
-    {
-      outputs_[i] = crossover_->getOutputBuffer(i).data();
-    }
-
-    std::cout << "Plugin created" << std::endl;
-  }
-
-  ~AlsaPluginDxO() {}
-
-  std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path)
-  {
-    std::ifstream file(path);
-
-    if(!file)
-    {
-      throw std::invalid_argument("Error: loadFIRCoeffs with " + path + " failed!");
-    }
-
-    std::vector<std::vector<float>> filters;
-    while(!file.eof())
-    {
-      std::string line;
-      while(std::getline(file, line))
-      {
-        std::vector<float> coeffs;
-        std::istringstream iss(line);
-        while(!iss.eof())
-        {
-          double value = 0;
-          iss >> value;
-          coeffs.push_back(static_cast<float>(value));
-        }
-
-        filters.push_back(coeffs);
-      }
-    }
-
-    return filters;
-  }
-
-  void print(const snd_pcm_channel_area_t* x, uint32_t offset)
-  {
-    auto* a = reinterpret_cast<uint16_t*>(snd_pcm_channel_area_addr(x + 0, offset));
-    auto* b = reinterpret_cast<uint16_t*>(snd_pcm_channel_area_addr(x + 1, offset));
-
-    std::cout << std::hex << "  a: " << (a) << "\n  b: " << (b) << "\n";
-    for(uint32_t i = 0; i < 4; ++i)
-    {
-      std::cout << "0x" << std::hex << std::setw(4) << std::setfill('0')
-                << (a[i * snd_pcm_channel_area_step(x + 0) / sizeof(uint16_t)]) << " ";
-      std::cout << "0x" << std::hex << std::setw(4) << std::setfill('0')
-                << (b[i * snd_pcm_channel_area_step(x + 1) / sizeof(uint16_t)]) << "\n";
-    }
-    std::cout << std::dec << std::endl;
-  }
-
-  template <bool _HasLfeChannel, typename _InputSampleType>
-  uint32_t update(PcmStream<_InputSampleType>& src, uint32_t size)
-  {
-    // std::cout << "Update " << (size) << std::endl;
-
-    PcmStream<int16_t> dst{outputBuffer_.get(), kNumOutputChannels};
-
-    auto i{0U};
-    while(i < size)
-    {
-      uint32_t segmentSize = std::min(size - i, blockSize_ - inputOffset_);
-      // std::cout << " Segment " << (segmentSize) << std::endl;
-
-      if(_HasLfeChannel)
-      {
-        src.extractInterleaved(
-            segmentSize, inputs_[0] + inputOffset_, inputs_[1] + inputOffset_, inputs_[2] + inputOffset_);
-      }
-      else
-      {
-        // std::cout << "  two channels" << std::endl;
-
-        src.extractInterleaved(segmentSize, inputs_[0] + inputOffset_, inputs_[1] + inputOffset_);
-
-        for(auto j{inputOffset_}; j < inputOffset_ + segmentSize; ++j)
-        {
-          inputs_[2][j] = (inputs_[0][j] + inputs_[1][j]) / 2;
-        }
-      }
-
-      inputOffset_ += segmentSize;
-      i += segmentSize;
-
-      if(inputOffset_ == blockSize_)
-      {
-        // memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
-        // memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
-        //  snd_pcm_areas_copy(dst_areas, dst_offset, src_areas, src_offset, 2, blockSize_, 2);
-
-        crossover_->updateInputs();
-
-        dst.loadInterleaved(blockSize_,
-                            outputs_[0],
-                            outputs_[1],
-                            outputs_[2],
-                            outputs_[3],
-                            outputs_[0],  // unused
-                            outputs_[6],
-                            outputs_[4],
-                            outputs_[5]);
-
-        syncOutputBuffer();
-
-        inputOffset_ = 0;
-        dst = PcmStream<int16_t>{outputBuffer_.get(), kNumOutputChannels};
-      }
-    }
-
-    streamPos_ += size;
-    return 0;
-  }
-
-  bool syncOutputBuffer()
-  {
-    auto result = snd_pcm_writei(pcm_, outputBuffer_.get(), blockSize_);
-
-    if(result < 0)
-    {
-      // snd_output_printf(output_, "underflow\n");  // snd_strerror(result));
-      // snd_output_flush(output_);
-      std::cout << "SyncOutputBuffer error: " << (snd_strerror(result)) << std::endl;
-      snd_pcm_recover(pcm_, result, 0);
-    }
-
-    return result == blockSize_;
-  }
-
-  uint32_t blockSize_{128};
-  std::vector<float*> inputs_{nullptr};
-  std::vector<float*> outputs_{nullptr};
-  uint32_t inputOffset_{0};
-  snd_output_t* output_{nullptr};
-  std::unique_ptr<FirMultiChannelCrossover> crossover_;
-  snd_pcm_t* pcm_{nullptr};
-  snd_pcm_hw_params_t* params_{nullptr};
-  std::unique_ptr<int16_t[]> outputBuffer_;
-  std::string pcmName_{};
-  uint32_t streamPos_{0};
-};
 
 extern "C" {
 
@@ -230,7 +34,7 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
       plugin->update<true>(src, size);
     }
   }
-  else if(ext->format == SND_PCM_FORMAT_S32_LE)
+  /*else if(ext->format == SND_PCM_FORMAT_S32_LE)
   {
     PcmStream<int32_t> src(src_areas, src_offset);
     if(ext->channels == 2)
@@ -241,14 +45,14 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
     {
       plugin->update<true>(src, size);
     }
-  }
+  }*/
 
   return size;
 }
 
 int dxo_prepare(snd_pcm_ioplug_t* ext)
 {
-  std::cout << "dxo_prepare" << std::endl;
+  std::cout << "dxo_prepare" << (ext) << std::endl;
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
 
   if(snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
@@ -261,8 +65,16 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     }
   }
 
+  std::cout << "dev opened" << std::endl;
+
+  // if(snd_pcm_nonblock(plugin->pcm_, 1) < 0)
+  {
+    //  std::cout << "Can't set nonblocking mode." << std::endl;
+  }
+
   snd_pcm_hw_params_alloca(&(plugin->params_));
   snd_pcm_hw_params_any(plugin->pcm_, plugin->params_);
+  snd_pcm_hw_params_dump(plugin->params_, plugin->output_);
 
   if(snd_pcm_hw_params_set_access(plugin->pcm_, plugin->params_, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
   {
@@ -286,12 +98,22 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     std::cout << "Can't set rate." << std::endl;
   }
 
-  /*if(snd_pcm_hw_params_set_period_size(plugin->pcm_, plugin->params_, plugin->blockSize_, 0) < 0)
+  if(snd_pcm_hw_params_set_period_size(plugin->pcm_, plugin->params_, plugin->blockSize_, 0) < 0)
   {
     snd_output_printf(plugin->output_, "Can't set period size.");
   }
 
-  int dir{0};
+  // if(snd_pcm_hw_params_set_buffer_size(plugin->pcm_, plugin->params_, plugin->blockSize_ * 128) < 0)
+  {
+    //  snd_output_printf(plugin->output_, "Can't set period size.");
+  }
+
+  // if(snd_pcm_hw_params_set_periods(plugin->pcm_, plugin->params_, 128, 0) < 0)
+  {
+    // snd_output_printf(plugin->output_, "Can't set period size.");
+  }
+
+  /*int dir{0};
   if(snd_pcm_hw_params_set_periods_min(plugin->pcm_, plugin->params_, 16U, &dir) < 0)
   {
     snd_output_printf(plugin->output_, "Can't set period size.");
@@ -302,10 +124,9 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
   {
     std::cout << "Can't set buffer size." << std::endl;
   }*/
-
   if(snd_pcm_hw_params(plugin->pcm_, plugin->params_) < 0)
   {
-    std::cout << "Can't set harware parameters." << std::endl;
+    std::cout << "Can't set harware parameters" << std::endl;
     snd_pcm_close(plugin->pcm_);
     plugin->pcm_ = nullptr;
     return -1;
@@ -316,9 +137,11 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
   snd_pcm_hw_params_get_period_size(plugin->params_, &periodSize, &dir);
   auto periods{0U};
   snd_pcm_hw_params_get_periods(plugin->params_, &periods, &dir);
-  /*snd_pcm_uframes_t bufferSize, bufferSizeMin, bufferSizeMax;
+  snd_pcm_uframes_t bufferSize, bufferSizeMin, bufferSizeMax;
   snd_pcm_hw_params_get_buffer_size(plugin->params_, &bufferSize);
-  snd_pcm_hw_params_get_buffer_size_min(plugin->params_, &bufferSizeMin);
+  std::cout << "HW:\n  PeriodSize: " << (periodSize) << "\n  Periods: " << (periods)
+            << "\n  BufferSize: " << (bufferSize) << std::endl;
+  /*snd_pcm_hw_params_get_buffer_size_min(plugin->params_, &bufferSizeMin);
   snd_pcm_hw_params_get_buffer_size_max(plugin->params_, &bufferSizeMax);
   std::cout << "XXX:\n  BufferSize: " << (bufferSize) << "\n  BufferSizeMin: " << (bufferSizeMin)
             << "\n  BufferSizeMax: " << (bufferSizeMax) << std::endl;
@@ -341,58 +164,58 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
      snd_output_printf(plugin->output_, "Can't set period size22.");
    }*/
 
-  snd_pcm_sw_params_t* sw_params;
-  auto rc = snd_pcm_sw_params_malloc(&sw_params);
-  if(rc < 0)
-  {
-    fprintf(stderr, "cannot allocate software parameters structure (%s)\n", snd_strerror(rc));
-    snd_pcm_close(plugin->pcm_);
-    return (-1);
-  }
+  /* snd_pcm_sw_params_t* sw_params;
+   auto rc = snd_pcm_sw_params_malloc(&sw_params);
+   if(rc < 0)
+   {
+     fprintf(stderr, "cannot allocate software parameters structure (%s)\n", snd_strerror(rc));
+     snd_pcm_close(plugin->pcm_);
+     return (-1);
+   }
 
-  rc = snd_pcm_sw_params_current(plugin->pcm_, sw_params);
-  if(rc < 0)
-  {
-    fprintf(stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(rc));
-    snd_pcm_close(plugin->pcm_);
-    return (-1);
-  }
+   rc = snd_pcm_sw_params_current(plugin->pcm_, sw_params);
+   if(rc < 0)
+   {
+     fprintf(stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(rc));
+     snd_pcm_close(plugin->pcm_);
+     return (-1);
+   }
 
-  snd_pcm_uframes_t thres = {0};
-  if(snd_pcm_sw_params_get_start_threshold(sw_params, &thres) < 0)
-  {
-    fprintf(stderr, "Error setting start threshold\n");
-    snd_pcm_close(plugin->pcm_);
-    return -1;
-  }
+   snd_pcm_uframes_t thres = {0};
+   if(snd_pcm_sw_params_get_start_threshold(sw_params, &thres) < 0)
+   {
+     fprintf(stderr, "Error setting start threshold\n");
+     snd_pcm_close(plugin->pcm_);
+     return -1;
+   }
 
-  std::cout << "Thres: " << (thres) << std::endl;
+   std::cout << "Thres: " << (thres) << std::endl;
 
-  snd_pcm_uframes_t startThreshold{std::max<snd_pcm_uframes_t>(((95 * periods) / 100) * periodSize, 1U)};
-  std::cout << "startThreshold: " << (startThreshold) << std::endl;
-  if(snd_pcm_sw_params_set_start_threshold(plugin->pcm_, sw_params, startThreshold) < 0)
-  {
-    fprintf(stderr, "Error setting start threshold\n");
-    snd_pcm_close(plugin->pcm_);
-    return -1;
-  }
+   snd_pcm_uframes_t startThreshold{std::max<snd_pcm_uframes_t>(((95 * periods) / 100) * periodSize, 1U)};
+   std::cout << "startThreshold: " << (startThreshold) << std::endl;
+   if(snd_pcm_sw_params_set_start_threshold(plugin->pcm_, sw_params, startThreshold) < 0)
+   {
+     fprintf(stderr, "Error setting start threshold\n");
+     snd_pcm_close(plugin->pcm_);
+     return -1;
+   }
 
-  snd_pcm_uframes_t stopThreshold{0};
-  if(snd_pcm_sw_params_set_stop_threshold(plugin->pcm_, sw_params, stopThreshold) < 0)
-  {
-    fprintf(stderr, "Error setting stop threshold\n");
-    snd_pcm_close(plugin->pcm_);
-    return -1;
-  }
+   snd_pcm_uframes_t stopThreshold{0};
+   if(snd_pcm_sw_params_set_stop_threshold(plugin->pcm_, sw_params, stopThreshold) < 0)
+   {
+     fprintf(stderr, "Error setting stop threshold\n");
+     snd_pcm_close(plugin->pcm_);
+     return -1;
+   }
 
-  if((rc = snd_pcm_sw_params(plugin->pcm_, sw_params)) < 0)
-  {
-    fprintf(stderr, "cannot set software parameters (%s)\n", snd_strerror(rc));
-    snd_pcm_close(plugin->pcm_);
-    return (-1);
-  }
+   if((rc = snd_pcm_sw_params(plugin->pcm_, sw_params)) < 0)
+   {
+     fprintf(stderr, "cannot set software parameters (%s)\n", snd_strerror(rc));
+     snd_pcm_close(plugin->pcm_);
+     return (-1);
+   }
 
-  snd_pcm_sw_params_free(sw_params);
+   snd_pcm_sw_params_free(sw_params);*/
 
   return 0;
 }
@@ -402,6 +225,9 @@ int dxo_close(snd_pcm_ioplug_t* ext)
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
 
   std::cout << "dxo_close!" << std::endl;
+  std::cout << "avg time: " << (plugin->totalTime_ / plugin->totalBlocks_) << std::endl;
+
+  delete plugin;
 
   if(plugin->pcm_)
   {
@@ -409,7 +235,6 @@ int dxo_close(snd_pcm_ioplug_t* ext)
     snd_pcm_close(plugin->pcm_);
     plugin->pcm_ = nullptr;
   }
-  delete plugin;
 
   return 0;
 }
@@ -546,7 +371,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   // snd_output_t* output;
   // snd_output_stdio_attach(&(output), stdout, 0);
 
-  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize);
+  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize, 1024);
   plugin->callback = &callbacks;
   plugin->version = SND_PCM_IOPLUG_VERSION;
   plugin->name = "dxo";
@@ -556,7 +381,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
 
   int32_t result = snd_pcm_ioplug_create(plugin, name, stream, mode);
 
-  std::cout << "snd_pcm_ioplug_create " << (result) << std::endl;
+  std::cout << "snd_pcm_ioplug_create " << (result) << "  " << (plugin) << std::endl;
 
   if(result < 0)
   {

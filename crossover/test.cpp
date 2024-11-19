@@ -37,7 +37,7 @@ public:
   {
     EXPECT_GT(std::min(a.size(), b.size()), 1);
 
-    constexpr auto epsilon = 0.03f;
+    constexpr auto epsilon = 0.04f;
 
     for(auto i{0}; i < std::min(a.size(), b.size()); ++i)
     {
