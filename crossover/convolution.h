@@ -5,12 +5,17 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstring>
 #include <list>
 #include <span>
 #include <vector>
 
 #include "../tasks/tasks.h"
 #include "fft.h"
+
+#ifdef BUILD_ARM
+#include "neon.h"
+#endif
 
 using ComplexVec = std::vector<std::complex<float>>;
 using RealVec = std::vector<float>;
@@ -33,6 +38,10 @@ static void multiply(std::complex<float>* result,
     --rend;
     while(r < rend)
     {
+#ifdef BUILD_ARM
+      neon::multiply(r, s1, s2);
+      neon::multiply(r + 4, s1 + 4, s2 + 4);
+#else
       r[0] = s1[0] * s2[0];
       r[1] = s1[1] * s2[1];
       r[2] = s1[2] * s2[2];
@@ -41,7 +50,7 @@ static void multiply(std::complex<float>* result,
       r[5] = s1[5] * s2[5];
       r[6] = s1[6] * s2[6];
       r[7] = s1[7] * s2[7];
-
+#endif
       s1 += 8;
       s2 += 8;
       r += 8;
@@ -73,6 +82,10 @@ static void multiplyAdd(std::complex<float>* result,
     --rend;
     while(r < rend)
     {
+#ifdef BUILD_ARM
+      neon::multiplyAdd(r, s1, s2);
+      neon::multiplyAdd(r + 4, s1 + 4, s2 + 4);
+#else
       r[0] += s1[0] * s2[0];
       r[1] += s1[1] * s2[1];
       r[2] += s1[2] * s2[2];
@@ -81,7 +94,7 @@ static void multiplyAdd(std::complex<float>* result,
       r[5] += s1[5] * s2[5];
       r[6] += s1[6] * s2[6];
       r[7] += s1[7] * s2[7];
-
+#endif
       s1 += 8;
       s2 += 8;
       r += 8;
@@ -113,6 +126,10 @@ static void add(std::complex<float>* result,
     --rend;
     while(r < rend)
     {
+#ifdef BUILD_ARM
+      neon::add(r, s1, s2);
+      neon::add(r + 4, s1 + 4, s2 + 4);
+#else
       r[0] = s1[0] + s2[0];
       r[1] = s1[1] + s2[1];
       r[2] = s1[2] + s2[2];
@@ -121,7 +138,7 @@ static void add(std::complex<float>* result,
       r[5] = s1[5] + s2[5];
       r[6] = s1[6] + s2[6];
       r[7] = s1[7] + s2[7];
-
+#endif
       s1 += 8;
       s2 += 8;
       r += 8;

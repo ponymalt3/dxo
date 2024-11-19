@@ -1,8 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <cstdlib>
 #include <initializer_list>
+#include <thread>
 #include <vector>
 
+#include "alsa_plugin.h"
 #include "pcm_stream.h"
 
 template <typename SampleType>
@@ -121,4 +125,91 @@ TEST_F(PcmStreamTest, Test_InterleavedLoad)
   EXPECT_EQ(interleaved[5].getData(0, 3), std::vector<int32_t>({16, 17, 18}));
   EXPECT_EQ(interleaved[6].getData(0, 3), std::vector<int32_t>({19, 20, 21}));
   EXPECT_EQ(interleaved[7].getData(0, 3), std::vector<int32_t>({22, 23, 24}));
+}
+
+TEST_F(PcmStreamTest, Test_PcmBuffer)
+{
+  float ch1[8][4];
+  float ch2[8][4];
+
+  int32_t i = 0;
+  for(auto& c : interleaved)
+  {
+    c.setData(0, {i++, i++, i++, i++});
+  }
+
+  PcmStream<int32_t> stream(interleaved.data(), 0);
+  PcmBuffer<int32_t> buffer(256);
+  buffer.store(stream, 4);
+
+  stream.extractInterleaved(4U, ch1[0], ch1[1], ch1[2], ch1[3], ch1[4], ch1[5], ch1[6], ch1[7]);
+  buffer.extractInterleaved(4U, ch2[0], ch2[1], ch2[2], ch2[3], ch2[4], ch2[5], ch2[6], ch2[7]);
+
+  for(auto i{0}; i < 8; ++i)
+  {
+    bool equal{true};
+    for(auto j{0}; j < 4; ++j)
+    {
+      equal = equal && ch1[i][j] == ch2[i][j];
+    }
+    EXPECT_TRUE(equal) << " at block " << (i);
+  }
+}
+
+class RingBufferTest : public testing::Test
+{
+public:
+  void sleepFor(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+};
+
+TEST_F(RingBufferTest, Test_ParallelRingBufferAccess)
+{
+  std::vector<uint32_t> inputs(100);
+  std::vector<uint32_t> outputs(100);
+
+  RingBuffer<uint32_t> buffers(13, uint32_t(1));
+
+  for(auto& i : inputs)
+  {
+    i = std::rand() % 9999;
+  }
+
+  std::thread producer([&]() {
+    for(auto i : inputs)
+    {
+      sleepFor(std::rand() % 10);
+      buffers.getElementForWrite() = i;
+      buffers.writeComplete();
+    }
+  });
+  std::thread consumer([&]() {
+    int x = 0;
+    for(auto& o : outputs)
+    {
+      o = buffers.getElementForRead();
+      buffers.readComplete();
+      sleepFor(std::rand() % 10);
+    }
+  });
+
+  if(producer.joinable())
+  {
+    producer.join();
+  }
+
+  if(consumer.joinable())
+  {
+    consumer.join();
+  }
+
+  uint32_t missmatches{0};
+  for(auto i{0}; i < inputs.size(); ++i)
+  {
+    if(inputs[i] != outputs[i])
+    {
+      ++missmatches;
+    }
+  }
+
+  EXPECT_EQ(missmatches, 0);
 }
