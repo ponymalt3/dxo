@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstring>
 #include <list>
 #include <span>
 #include <vector>
