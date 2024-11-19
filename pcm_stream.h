@@ -51,11 +51,48 @@ public:
     addr_ = srcMax;
   }
 
-protected:
+  // protected:
   uint32_t calculateOffset(uint32_t offset) { return step_ * offset; }
 
-  const snd_pcm_channel_area_t* area_;
   SampleType* addr_;
   uint32_t step_;
-  uint32_t offset_;
+};
+
+template <typename SampleType>
+class PcmBuffer : public PcmStream<SampleType>
+{
+public:
+  PcmBuffer(uint32_t maxSize)
+      : PcmStream<SampleType>(reinterpret_cast<SampleType*>(0), 0),
+        buffer_{new SampleType[maxSize]},
+        size_{0},
+        maxSize_{maxSize}
+  {
+  }
+
+  PcmBuffer(const PcmBuffer& cpy) : PcmBuffer(cpy.maxSize_)
+  {
+    this->addr_ = cpy.addr_;
+    this->step_ = cpy.step_;
+    this->size_ = cpy.size_;
+    this->maxSize_ = cpy.maxSize_;
+  }
+
+  void store(const PcmStream<SampleType>& stream, uint32_t size)
+  {
+    memcpy(
+        buffer_.get(), stream.addr_, std::min<uint32_t>(maxSize_, stream.step_ * size * sizeof(SampleType)));
+    this->step_ = stream.step_;
+    this->addr_ = buffer_.get();
+    size_ = size;
+  }
+
+  uint32_t getNumChannels() const { return this->step_ / sizeof(SampleType); }
+
+  uint32_t available() const { return size_ - ((this->addr_ - buffer_.get()) / this->step_); }
+
+protected:
+  std::unique_ptr<SampleType> buffer_;
+  uint32_t size_;
+  uint32_t maxSize_;
 };
