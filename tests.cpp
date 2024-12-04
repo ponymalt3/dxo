@@ -156,60 +156,19 @@ TEST_F(PcmStreamTest, Test_PcmBuffer)
   }
 }
 
-class RingBufferTest : public testing::Test
+class AlsaPluginTest : public testing::Test
 {
 public:
   void sleepFor(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 };
 
-TEST_F(RingBufferTest, Test_ParallelRingBufferAccess)
+TEST_F(AlsaPluginTest, Test_LoadCoefficents)
 {
-  std::vector<uint32_t> inputs(100);
-  std::vector<uint32_t> outputs(100);
+  auto coeffs = AlsaPluginDxO::loadFIRCoeffs("coeffs.m");
+  ASSERT_EQ(coeffs.size(), 7);
 
-  RingBuffer<uint32_t> buffers(13, uint32_t(1));
-
-  for(auto& i : inputs)
+  for(auto& filter : coeffs)
   {
-    i = std::rand() % 9999;
+    EXPECT_EQ(4096, filter.size());
   }
-
-  std::thread producer([&]() {
-    for(auto i : inputs)
-    {
-      sleepFor(std::rand() % 10);
-      buffers.getElementForWrite() = i;
-      buffers.writeComplete();
-    }
-  });
-  std::thread consumer([&]() {
-    int x = 0;
-    for(auto& o : outputs)
-    {
-      o = buffers.getElementForRead();
-      buffers.readComplete();
-      sleepFor(std::rand() % 10);
-    }
-  });
-
-  if(producer.joinable())
-  {
-    producer.join();
-  }
-
-  if(consumer.joinable())
-  {
-    consumer.join();
-  }
-
-  uint32_t missmatches{0};
-  for(auto i{0}; i < inputs.size(); ++i)
-  {
-    if(inputs[i] != outputs[i])
-    {
-      ++missmatches;
-    }
-  }
-
-  EXPECT_EQ(missmatches, 0);
 }

@@ -10,8 +10,6 @@ extern "C" {
 snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  // std::cout << "dxo_pointer " << (plugin->streamPos_ % (plugin->buffer_size / 2)) << std::endl;
-
   return plugin->streamPos_ % (plugin->buffer_size / 2);
 }
 
@@ -34,42 +32,24 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
       plugin->update<true>(src, size);
     }
   }
-  /*else if(ext->format == SND_PCM_FORMAT_S32_LE)
-  {
-    PcmStream<int32_t> src(src_areas, src_offset);
-    if(ext->channels == 2)
-    {
-      plugin->update<false>(src, size);
-    }
-    else
-    {
-      plugin->update<true>(src, size);
-    }
-  }*/
 
   return size;
 }
 
 int dxo_prepare(snd_pcm_ioplug_t* ext)
 {
-  std::cout << "dxo_prepare" << (ext) << std::endl;
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  plugin->print("dxo_prepare");
 
   if(snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
   {
-    snd_output_printf(plugin->output_, "Can't open device.");
+    plugin->print("snd_pcm_open failed\n");
 
     if(snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
     {
+      plugin->pcm_ = nullptr;
       return -EBUSY;
     }
-  }
-
-  std::cout << "dev opened" << std::endl;
-
-  // if(snd_pcm_nonblock(plugin->pcm_, 1) < 0)
-  {
-    //  std::cout << "Can't set nonblocking mode." << std::endl;
   }
 
   snd_pcm_hw_params_alloca(&(plugin->params_));
@@ -78,144 +58,38 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
 
   if(snd_pcm_hw_params_set_access(plugin->pcm_, plugin->params_, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
   {
-    std::cout << "Can't set interleaved mode." << std::endl;
+    plugin->print("snd_pcm_hw_params_set_access failed\n");
   }
 
   if(snd_pcm_hw_params_set_format(plugin->pcm_, plugin->params_, SND_PCM_FORMAT_S16_LE) < 0)
   {
-    std::cout << "Can't set format." << std::endl;
+    plugin->print("snd_pcm_hw_params_set_format failed\n");
   }
 
   if(snd_pcm_hw_params_set_channels(plugin->pcm_, plugin->params_, AlsaPluginDxO::kNumOutputChannels) < 0)
   {
-    std::cout << "Can't set channels number." << std::endl;
+    plugin->print("snd_pcm_hw_params_set_channels failed\n");
   }
 
   uint32_t rate = plugin->rate;
   std::cout << "rate: " << (rate) << std::endl;
   if(snd_pcm_hw_params_set_rate_near(plugin->pcm_, plugin->params_, &rate, 0) < 0)
   {
-    std::cout << "Can't set rate." << std::endl;
+    plugin->print("snd_pcm_hw_params_set_rate_near failed\n");
   }
 
   if(snd_pcm_hw_params_set_period_size(plugin->pcm_, plugin->params_, plugin->blockSize_, 0) < 0)
   {
-    snd_output_printf(plugin->output_, "Can't set period size.");
+    plugin->print("snd_pcm_hw_params_set_period_size failed\n");
   }
 
-  // if(snd_pcm_hw_params_set_buffer_size(plugin->pcm_, plugin->params_, plugin->blockSize_ * 128) < 0)
-  {
-    //  snd_output_printf(plugin->output_, "Can't set period size.");
-  }
-
-  // if(snd_pcm_hw_params_set_periods(plugin->pcm_, plugin->params_, 128, 0) < 0)
-  {
-    // snd_output_printf(plugin->output_, "Can't set period size.");
-  }
-
-  /*int dir{0};
-  if(snd_pcm_hw_params_set_periods_min(plugin->pcm_, plugin->params_, 16U, &dir) < 0)
-  {
-    snd_output_printf(plugin->output_, "Can't set period size.");
-  }
-
-  snd_pcm_uframes_t minBufferSize = plugin->blockSize_ * 128U;
-  if(snd_pcm_hw_params_set_buffer_size_min(plugin->pcm_, plugin->params_, &minBufferSize) < 0)
-  {
-    std::cout << "Can't set buffer size." << std::endl;
-  }*/
   if(snd_pcm_hw_params(plugin->pcm_, plugin->params_) < 0)
   {
-    std::cout << "Can't set harware parameters" << std::endl;
+    plugin->print("snd_pcm_hw_params failed\n");
     snd_pcm_close(plugin->pcm_);
     plugin->pcm_ = nullptr;
-    return -1;
+    return -EINVAL;
   }
-
-  snd_pcm_uframes_t periodSize{0};
-  int dir{0};
-  snd_pcm_hw_params_get_period_size(plugin->params_, &periodSize, &dir);
-  auto periods{0U};
-  snd_pcm_hw_params_get_periods(plugin->params_, &periods, &dir);
-  snd_pcm_uframes_t bufferSize, bufferSizeMin, bufferSizeMax;
-  snd_pcm_hw_params_get_buffer_size(plugin->params_, &bufferSize);
-  std::cout << "HW:\n  PeriodSize: " << (periodSize) << "\n  Periods: " << (periods)
-            << "\n  BufferSize: " << (bufferSize) << std::endl;
-  /*snd_pcm_hw_params_get_buffer_size_min(plugin->params_, &bufferSizeMin);
-  snd_pcm_hw_params_get_buffer_size_max(plugin->params_, &bufferSizeMax);
-  std::cout << "XXX:\n  BufferSize: " << (bufferSize) << "\n  BufferSizeMin: " << (bufferSizeMin)
-            << "\n  BufferSizeMax: " << (bufferSizeMax) << std::endl;
-
-  uint32_t periods, periodsMin, periodsMax;
-  snd_pcm_hw_params_get_periods(plugin->params_, &periods, nullptr);
-  snd_pcm_hw_params_get_periods_min(plugin->params_, &periodsMin, nullptr);
-  snd_pcm_hw_params_get_periods_max(plugin->params_, &periodsMax, nullptr);
-
-  std::cout << "HW:\n  PeriodSize: " << (periodSize) << "\n  Periods: " << (periods)
-            << "\n  PeriodsMin: " << (periodsMin) << "\n  PeriodsMax: " << (periodsMax) << std::endl;*/
-
-  /* if(snd_pcm_hw_params_set_buffer_size(plugin->pcm_, plugin->params_, bufferSizeMax) < 0)
-   {
-     std::cout << "Can't set buffer size33." << std::endl;
-   }
-
-   if(snd_pcm_hw_params_set_periods(plugin->pcm_, plugin->params_, periodsMax, 0) < 0)
-   {
-     snd_output_printf(plugin->output_, "Can't set period size22.");
-   }*/
-
-  /* snd_pcm_sw_params_t* sw_params;
-   auto rc = snd_pcm_sw_params_malloc(&sw_params);
-   if(rc < 0)
-   {
-     fprintf(stderr, "cannot allocate software parameters structure (%s)\n", snd_strerror(rc));
-     snd_pcm_close(plugin->pcm_);
-     return (-1);
-   }
-
-   rc = snd_pcm_sw_params_current(plugin->pcm_, sw_params);
-   if(rc < 0)
-   {
-     fprintf(stderr, "cannot initialize software parameters structure (%s)\n", snd_strerror(rc));
-     snd_pcm_close(plugin->pcm_);
-     return (-1);
-   }
-
-   snd_pcm_uframes_t thres = {0};
-   if(snd_pcm_sw_params_get_start_threshold(sw_params, &thres) < 0)
-   {
-     fprintf(stderr, "Error setting start threshold\n");
-     snd_pcm_close(plugin->pcm_);
-     return -1;
-   }
-
-   std::cout << "Thres: " << (thres) << std::endl;
-
-   snd_pcm_uframes_t startThreshold{std::max<snd_pcm_uframes_t>(((95 * periods) / 100) * periodSize, 1U)};
-   std::cout << "startThreshold: " << (startThreshold) << std::endl;
-   if(snd_pcm_sw_params_set_start_threshold(plugin->pcm_, sw_params, startThreshold) < 0)
-   {
-     fprintf(stderr, "Error setting start threshold\n");
-     snd_pcm_close(plugin->pcm_);
-     return -1;
-   }
-
-   snd_pcm_uframes_t stopThreshold{0};
-   if(snd_pcm_sw_params_set_stop_threshold(plugin->pcm_, sw_params, stopThreshold) < 0)
-   {
-     fprintf(stderr, "Error setting stop threshold\n");
-     snd_pcm_close(plugin->pcm_);
-     return -1;
-   }
-
-   if((rc = snd_pcm_sw_params(plugin->pcm_, sw_params)) < 0)
-   {
-     fprintf(stderr, "cannot set software parameters (%s)\n", snd_strerror(rc));
-     snd_pcm_close(plugin->pcm_);
-     return (-1);
-   }
-
-   snd_pcm_sw_params_free(sw_params);*/
 
   return 0;
 }
@@ -224,8 +98,8 @@ int dxo_close(snd_pcm_ioplug_t* ext)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
 
-  std::cout << "dxo_close!" << std::endl;
-  std::cout << "avg time: " << (plugin->totalTime_ / plugin->totalBlocks_) << std::endl;
+  plugin->print("dxo_close\n");
+  plugin->print("avg time: %f\n", plugin->totalTime_ / plugin->totalBlocks_);
 
   delete plugin;
 
@@ -368,9 +242,6 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  // snd_output_t* output;
-  // snd_output_stdio_attach(&(output), stdout, 0);
-
   AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize, 1024);
   plugin->callback = &callbacks;
   plugin->version = SND_PCM_IOPLUG_VERSION;
@@ -379,61 +250,60 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   plugin->output_ = output;
   plugin->pcmName_ = slavePcm;
 
-  int32_t result = snd_pcm_ioplug_create(plugin, name, stream, mode);
-
-  std::cout << "snd_pcm_ioplug_create " << (result) << "  " << (plugin) << std::endl;
+  auto result = snd_pcm_ioplug_create(plugin, name, stream, mode);
 
   if(result < 0)
   {
+    plugin->print("snd_pcm_ioplug_create failed\n");
     return result;
   }
 
   static constexpr uint32_t supportedAccess[] = {SND_PCM_ACCESS_RW_INTERLEAVED};
   static constexpr uint32_t supportedFormats[] = {SND_PCM_FORMAT_S16_LE, SND_PCM_FORMAT_S32_LE};
-  static constexpr uint32_t supportedPeriodSize[] = {
-      128 * 4, 256 * 4, 512 * 4, 1024 * 4, 128 * 6, 256 * 6, 512 * 6, 1024 * 6};
+  static constexpr uint32_t supportedHwRates[] = {44100, 48000};
 
   if(snd_pcm_ioplug_set_param_list(
          plugin, SND_PCM_IOPLUG_HW_ACCESS, std::size(supportedAccess), supportedAccess) < 0)
   {
-    std::cout << "Error SND_PCM_IOPLUG_HW_ACCESS failed" << std::endl;
+    plugin->print("SND_PCM_IOPLUG_HW_ACCESS failed\n");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_list(
          plugin, SND_PCM_IOPLUG_HW_FORMAT, std::size(supportedFormats), supportedFormats) < 0)
   {
-    std::cout << "Error SND_PCM_IOPLUG_HW_FORMAT failed" << std::endl;
+    plugin->print("SND_PCM_IOPLUG_HW_FORMAT failed\n");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_CHANNELS, 2, 3) < 0)
   {
-    std::cout << "Error SND_PCM_IOPLUG_HW_CHANNELS failed" << std::endl;
+    plugin->print("SND_PCM_IOPLUG_HW_CHANNELS failed\n");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 16, 2 * 1024 * 1024) < 0)
   {
-    std::cout << "Error SND_PCM_IOPLUG_HW_PERIOD_BYTES failed" << std::endl;
+    plugin->print("SND_PCM_IOPLUG_HW_PERIOD_BYTES failed\n");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_BUFFER_BYTES, 16, 2 * 1024 * 1024) < 0)
   {
-    std::cout << "Error SND_PCM_IOPLUG_HW_BUFFER_BYTES failed" << std::endl;
+    plugin->print("SND_PCM_IOPLUG_HW_BUFFER_BYTES failed\n");
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_RATE, 44100, 48000) < 0)
+  if(snd_pcm_ioplug_set_param_list(
+         plugin, SND_PCM_IOPLUG_HW_RATE, std::size(supportedHwRates), supportedHwRates) < 0)
   {
-    std::cout << "Error SND_PCM_IOPLUG_HW_RATE failed" << std::endl;
+    plugin->print("SND_PCM_IOPLUG_HW_RATE failed\n");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIODS, 1, 1024) < 0)
   {
-    std::cout << "Error SND_PCM_IOPLUG_HW_PERIOD_BYTES failed" << std::endl;
+    plugin->print("SND_PCM_IOPLUG_HW_PERIODS failed\n");
     return -EINVAL;
   }
 
