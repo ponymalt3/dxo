@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
@@ -14,74 +15,6 @@
 #include "crossover/fir_crossover.h"
 #include "fftw3.h"
 #include "pcm_stream.h"
-
-template <typename _T>
-class RingBuffer
-{
-public:
-  RingBuffer(uint32_t numElements, _T init) : elements_(numElements, init), stop_(false) {}
-
-  ~RingBuffer()
-  {
-    stop_ = true;
-    cv_.notify_all();
-  }
-
-  _T& getElementForWrite()
-  {
-    waitNotFull();
-    return elements_[wptr_ % elements_.size()];
-  }
-
-  void writeComplete()
-  {
-    waitNotFull();
-    ++wptr_;
-    cv_.notify_one();
-  }
-
-  _T& getElementForRead()
-  {
-    waitNotEmpty();
-    return elements_[rptr_ % elements_.size()];
-  }
-
-  void readComplete()
-  {
-    waitNotEmpty();
-    ++rptr_;
-    cv_.notify_one();
-  }
-
-  bool empty() const { return rptr_ == wptr_; }
-  bool full() const { return (wptr_ - rptr_) == elements_.size() - 1; }
-
-  void waitNotFull()
-  {
-    if(full())
-    {
-      std::unique_lock lock(mutex_);
-      cv_.wait(lock, [this] { return !full() || stop_; });
-    }
-  }
-
-  void waitNotEmpty()
-  {
-    if(empty())
-    {
-      std::unique_lock lock(mutex_);
-      cv_.wait(lock, [this] { return !empty() || stop_; });
-    }
-  }
-
-protected:
-  std::vector<_T> elements_;
-  std::atomic<uint32_t> rptr_{0};
-  std::atomic<uint32_t> wptr_{0};
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  std::atomic_bool stop_;
-};
 
 class AlsaPluginDxO : public snd_pcm_ioplug_t
 {
@@ -136,7 +69,7 @@ public:
 
   ~AlsaPluginDxO() {}
 
-  std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path)
+  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path)
   {
     std::ifstream file(path);
 
@@ -152,12 +85,12 @@ public:
       while(std::getline(file, line))
       {
         uint32_t posNotWhiteSpace = 0;
-        while(line[posNotWhiteSpace] == ' ' || line[posNotWhiteSpace] == '\t')
+        while(std::isspace(line[posNotWhiteSpace]))
         {
           ++posNotWhiteSpace;
         }
 
-        if(line.substr(posNotWhiteSpace).starts_with('#') || line.substr(posNotWhiteSpace).starts_with('\n'))
+        if(line.substr(posNotWhiteSpace).starts_with('#') || line.length() == posNotWhiteSpace)
         {
           continue;
         }
