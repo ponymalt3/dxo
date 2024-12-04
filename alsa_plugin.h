@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
@@ -15,74 +16,6 @@
 #include "fftw3.h"
 #include "pcm_stream.h"
 
-template <typename _T>
-class RingBuffer
-{
-public:
-  RingBuffer(uint32_t numElements, _T init) : elements_(numElements, init), stop_(false) {}
-
-  ~RingBuffer()
-  {
-    stop_ = true;
-    cv_.notify_all();
-  }
-
-  _T& getElementForWrite()
-  {
-    waitNotFull();
-    return elements_[wptr_ % elements_.size()];
-  }
-
-  void writeComplete()
-  {
-    waitNotFull();
-    ++wptr_;
-    cv_.notify_one();
-  }
-
-  _T& getElementForRead()
-  {
-    waitNotEmpty();
-    return elements_[rptr_ % elements_.size()];
-  }
-
-  void readComplete()
-  {
-    waitNotEmpty();
-    ++rptr_;
-    cv_.notify_one();
-  }
-
-  bool empty() const { return rptr_ == wptr_; }
-  bool full() const { return (wptr_ - rptr_) == elements_.size() - 1; }
-
-  void waitNotFull()
-  {
-    if(full())
-    {
-      std::unique_lock lock(mutex_);
-      cv_.wait(lock, [this] { return !full() || stop_; });
-    }
-  }
-
-  void waitNotEmpty()
-  {
-    if(empty())
-    {
-      std::unique_lock lock(mutex_);
-      cv_.wait(lock, [this] { return !empty() || stop_; });
-    }
-  }
-
-protected:
-  std::vector<_T> elements_;
-  std::atomic<uint32_t> rptr_{0};
-  std::atomic<uint32_t> wptr_{0};
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  std::atomic_bool stop_;
-};
-
 class AlsaPluginDxO : public snd_pcm_ioplug_t
 {
 public:
@@ -92,13 +25,11 @@ public:
     kNumPeriods = 50
   };
 
-  typedef PcmBuffer<int16_t> BufType;
-
   AlsaPluginDxO(const std::string& path, uint32_t blockSize, uint32_t periodSize)
       : blockSize_(blockSize),
         periodSize_(periodSize),
         inputs_(3),
-        outputs_(5),
+        outputs_(7),
         inputOffset_(0),
         outputBuffer_{new int16_t[blockSize_ * kNumOutputChannels]}
   // thread_([this]() { run(); })
@@ -111,10 +42,10 @@ public:
 
     std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
                                                              {0, coeffs[1]},
-                                                             // {0, coeffs[2]},
+                                                             {0, coeffs[2]},
                                                              {1, coeffs[3]},
                                                              {1, coeffs[4]},
-                                                             // {1, coeffs[5]},
+                                                             {1, coeffs[5]},
                                                              {2, coeffs[6]}};
 
     std::cout << "create Crossover: " << std::endl;
@@ -136,7 +67,7 @@ public:
 
   ~AlsaPluginDxO() {}
 
-  std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path)
+  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path)
   {
     std::ifstream file(path);
 
@@ -152,12 +83,12 @@ public:
       while(std::getline(file, line))
       {
         uint32_t posNotWhiteSpace = 0;
-        while(line[posNotWhiteSpace] == ' ' || line[posNotWhiteSpace] == '\t')
+        while(std::isspace(line[posNotWhiteSpace]))
         {
           ++posNotWhiteSpace;
         }
 
-        if(line.substr(posNotWhiteSpace).starts_with('#') || line.substr(posNotWhiteSpace).starts_with('\n'))
+        if(line.substr(posNotWhiteSpace).starts_with('#') || line.length() == posNotWhiteSpace)
         {
           continue;
         }
@@ -247,27 +178,24 @@ public:
                             outputs_[2],
                             outputs_[3],
                             outputs_[0],  // unused
+                            outputs_[6],
                             outputs_[4],
-                            outputs_[0],
-                            outputs_[0]);
+                            outputs_[5]);
 
-        // if(dstSize++ == 10)
+        auto result = snd_pcm_writei(pcm_, outputBuffer_.get(), blockSize_);
+
+        if(result != blockSize_)
         {
-          snd_pcm_sframes_t result = snd_pcm_writei(pcm_, outputBuffer_.get(), blockSize_);
+          if(result < 0)
           {
-            if(result == -EAGAIN)
-            {
-              std::cout << "result: " << (result) << std::endl;
-              std::this_thread::yield();
-            }
-            else if(result < 0)
-            {
-              // snd_output_printf(output_, "underflow\n");  // snd_strerror(result));
-              // snd_output_flush(output_);
-              snd_pcm_recover(pcm_, result, 0);
-              std::cout << "SyncOutputBuffer error: " << (snd_strerror(result)) << std::endl;
-            }
+            snd_output_printf(output_, "write error [%s]\n", snd_strerror(result));
           }
+          else
+          {
+            snd_output_printf(output_, "incomplete write %d/%d\n", result, blockSize_);
+          }
+
+          snd_pcm_recover(pcm_, result, 0);
         }
 
         inputOffset_ = 0;
