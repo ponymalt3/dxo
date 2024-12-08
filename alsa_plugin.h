@@ -115,17 +115,18 @@ public:
   void print(const char* fmt, Args... args)
   {
     snd_output_printf(output_, fmt, args...);
+    snd_output_flush(output_);
   }
 
-  template <bool _HasLfeChannel, typename _InputSampleType>
-  uint32_t update(PcmStream<_InputSampleType>& src, uint32_t size)
+  template <typename _InputSampleType>
+  uint32_t update(PcmStream<_InputSampleType>& src, uint32_t size, bool hasLFE)
   {
     auto i{0U};
     while(i < size)
     {
       uint32_t segmentSize = std::min(size - i, blockSize_ - inputOffset_);
 
-      if(_HasLfeChannel)
+      if(hasLFE)
       {
         src.extractInterleaved(
             segmentSize, inputs_[0] + inputOffset_, inputs_[1] + inputOffset_, inputs_[2] + inputOffset_);
@@ -181,7 +182,7 @@ public:
           }
           else
           {
-            snd_output_printf(output_, "incomplete write %d/%d\n", result, blockSize_);
+            snd_output_printf(output_, "incomplete write %ld/%d\n", result, blockSize_);
           }
 
           snd_pcm_recover(pcm_, result, 0);

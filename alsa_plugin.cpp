@@ -23,14 +23,12 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
   if(ext->format == SND_PCM_FORMAT_S16_LE)
   {
     PcmStream<int16_t> src(src_areas, src_offset);
-    if(ext->channels == 2)
-    {
-      plugin->update<false>(src, size);
-    }
-    else
-    {
-      plugin->update<true>(src, size);
-    }
+    plugin->update(src, size, ext->channels == 3);
+  }
+  else if(ext->format == SND_PCM_FORMAT_FLOAT_LE)
+  {
+    PcmStream<float> src(src_areas, src_offset);
+    plugin->update(src, size, ext->channels == 3);
   }
 
   return size;
@@ -91,6 +89,17 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     return -EINVAL;
   }
 
+  auto chMap = snd_pcm_get_chmap(plugin->pcm);
+
+  if(chMap)
+  {
+    for(uint32_t i = 0; i < chMap[0].channels; ++i)
+    {
+      plugin->print("CHMAP[%d]: %d\n", i, chMap[0].pos[i]);
+    }
+    plugin->print("\n");
+  }
+
   return 0;
 }
 
@@ -107,6 +116,7 @@ int dxo_close(snd_pcm_ioplug_t* ext)
   {
     snd_pcm_drain(plugin->pcm_);
     snd_pcm_close(plugin->pcm_);
+    snd_output_close(plugin->output_);
     plugin->pcm_ = nullptr;
   }
 
@@ -114,50 +124,55 @@ int dxo_close(snd_pcm_ioplug_t* ext)
 }
 
 // Channel map (ALSA channel definitions)
-static const unsigned int kChannelMap[] = {
-    SND_CHMAP_FL,   // Front Left
-    SND_CHMAP_FR,   // Front Right
-    SND_CHMAP_RL,   // Rear Left
-    SND_CHMAP_RR,   // Rear Right
-    SND_CHMAP_FC,   // Center (not used)
-    SND_CHMAP_LFE,  // Subwoofer (direct mapping)
-    SND_CHMAP_SL,   // Surround Left
-    SND_CHMAP_SR    // Surround Right
-};
+static const unsigned int kChannelMaps[][3] = {{
+                                                   SND_CHMAP_FL,  // Front Left
+                                                   SND_CHMAP_FR   // Front Right
+                                               },
+                                               {SND_CHMAP_FL,  // Front Left
+                                                SND_CHMAP_FR,  // Front Right
+                                                SND_CHMAP_LFE}};
 
 snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* ext ATTRIBUTE_UNUSED)
 {
-  auto maps = static_cast<snd_pcm_chmap_query_t**>(malloc(sizeof(snd_pcm_chmap_query_t*) * 2));
+  auto maps = static_cast<snd_pcm_chmap_query_t**>(
+      malloc(sizeof(snd_pcm_chmap_query_t*) * (std::size(kChannelMaps) + 1)));
 
   if(!maps)
   {
     return nullptr;
   }
 
-  maps[0] = static_cast<snd_pcm_chmap_query_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + sizeof(kChannelMap)));
-  maps[1] = nullptr;
-
-  if(maps[0] == nullptr)
+  for(auto i{0}; i < std::size(kChannelMaps); ++i)
   {
-    snd_pcm_free_chmaps(maps);
-    return nullptr;
+    maps[i] = static_cast<snd_pcm_chmap_query_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + 3));
+
+    if(maps[i] == nullptr)
+    {
+      // snd_pcm_free_chmaps(maps);
+      // return nullptr;
+    }
+
+    maps[i]->type = SND_CHMAP_TYPE_FIXED;
+    maps[i]->map.channels = 2 + i;
+    memcpy(maps[i]->map.pos, kChannelMaps[i], maps[i]->map.channels);
   }
 
-  maps[0]->type = SND_CHMAP_TYPE_FIXED;
-  maps[0]->map.channels = sizeof(kChannelMap);
-  memcpy(maps[0]->map.pos, kChannelMap, sizeof(kChannelMap));
+  maps[std::size(kChannelMaps)] = nullptr;
 
   return maps;
 }
 
-snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* ext ATTRIBUTE_UNUSED)
+snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
-  auto map = static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + sizeof(kChannelMap)));
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  plugin->print("dxo_get_chmap");
+
+  auto map = static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + 3));
 
   if(map)
   {
-    map->channels = sizeof(kChannelMap);
-    memcpy(map->pos, kChannelMap, sizeof(kChannelMap));
+    map->channels = plugin->channels;
+    memcpy(map->pos, kChannelMaps[plugin->channels - 2], plugin->channels);
   }
 
   return map;
@@ -185,7 +200,12 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   snd_config_t* slaveConfig = nullptr;
 
   snd_output_t* output;
-  snd_output_stdio_attach(&(output), stdout, 0);
+// snd_output_stdio_attach(&(output), stdout, 0);
+#ifdef BUILD_ARM
+  snd_output_stdio_open(&(output), "/storage/dxo.txt", "w");
+#else
+  snd_output_stdio_open(&(output), "/home/malte/dxo.txt", "w");
+#endif
 
   snd_config_iterator_t i, next;
   snd_config_for_each(i, next, conf)
@@ -259,7 +279,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   }
 
   static constexpr uint32_t supportedAccess[] = {SND_PCM_ACCESS_RW_INTERLEAVED};
-  static constexpr uint32_t supportedFormats[] = {SND_PCM_FORMAT_S16_LE, SND_PCM_FORMAT_S32_LE};
+  static constexpr uint32_t supportedFormats[] = {SND_PCM_FORMAT_S16_LE, SND_PCM_FORMAT_FLOAT_LE};
   static constexpr uint32_t supportedHwRates[] = {44100, 48000};
 
   if(snd_pcm_ioplug_set_param_list(
