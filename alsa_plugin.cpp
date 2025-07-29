@@ -5,6 +5,8 @@
 #include <alsa/pcm_external.h>
 #include <stdint.h>
 
+#include <array>
+
 extern "C" {
 
 snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io)
@@ -125,17 +127,18 @@ int dxo_close(snd_pcm_ioplug_t* ext)
 }
 
 // Channel map (ALSA channel definitions)
-static const unsigned int kChannelMaps[][3] = {{
-                                                   SND_CHMAP_FL,  // Front Left
-                                                   SND_CHMAP_FR   // Front Right
-                                               },
-                                               {SND_CHMAP_FL,  // Front Left
-                                                SND_CHMAP_FR,  // Front Right
-                                                SND_CHMAP_LFE}};
+struct ChannelMap
+{
+  uint32_t num_channels;
+  std::array<unsigned int, 3> channels{};
+};
+
+static const ChannelMap kChannelMaps[] = {{2, {SND_CHMAP_FL, SND_CHMAP_FR, 0U}},
+                                          {3, {SND_CHMAP_FL, SND_CHMAP_FR, SND_CHMAP_LFE}}};
+const int kNumChannelMaps = std::size(kChannelMaps);
 
 snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
-  const int kNumChannelMaps = std::size(kChannelMaps);
 
   auto maps =
       static_cast<snd_pcm_chmap_query_t**>(malloc(sizeof(snd_pcm_chmap_query_t*) * (kNumChannelMaps + 1)));
@@ -147,7 +150,8 @@ snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 
   for(auto i{0}; i < kNumChannelMaps; ++i)
   {
-    maps[i] = static_cast<snd_pcm_chmap_query_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + 3));
+    maps[i] = static_cast<snd_pcm_chmap_query_t*>(
+        malloc(sizeof(snd_pcm_chmap_query_t) + sizeof(kChannelMaps[i].channels)));
 
     if(maps[i] == nullptr)
     {
@@ -156,11 +160,11 @@ snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
     }
 
     maps[i]->type = SND_CHMAP_TYPE_FIXED;
-    maps[i]->map.channels = 2 + i;
-    memcpy(maps[i]->map.pos, kChannelMaps[i], maps[i]->map.channels * sizeof(kChannelMaps[i][0]));
+    maps[i]->map.channels = kChannelMaps[i].num_channels;
+    memcpy(maps[i]->map.pos, kChannelMaps[i].channels.data(), sizeof(kChannelMaps[i].channels));
   }
 
-  maps[std::size(kChannelMaps)] = nullptr;
+  maps[kNumChannelMaps] = nullptr;
 
   return maps;
 }
@@ -169,13 +173,15 @@ snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
 
-  auto map = static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + 3));
+  auto map =
+      static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_t) + sizeof(kChannelMaps[0].channels)));
 
   if(map)
   {
-    const auto map_index = plugin->channels - 2;
+    const auto map_index =
+        std::min(std::max(static_cast<int32_t>(plugin->channels) - 2, 0), kNumChannelMaps - 1);
     map->channels = plugin->channels;
-    memcpy(map->pos, kChannelMaps[map_index], plugin->channels * sizeof(kChannelMaps[map_index][0]));
+    memcpy(map->pos, kChannelMaps[map_index].channels.data(), sizeof(kChannelMaps[0].channels));
   }
 
   return map;
