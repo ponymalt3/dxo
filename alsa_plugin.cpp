@@ -133,29 +133,31 @@ static const unsigned int kChannelMaps[][3] = {{
                                                 SND_CHMAP_FR,  // Front Right
                                                 SND_CHMAP_LFE}};
 
-snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* ext ATTRIBUTE_UNUSED)
+snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
-  auto maps = static_cast<snd_pcm_chmap_query_t**>(
-      malloc(sizeof(snd_pcm_chmap_query_t*) * (std::size(kChannelMaps) + 1)));
+  const int kNumChannelMaps = std::size(kChannelMaps);
+
+  auto maps =
+      static_cast<snd_pcm_chmap_query_t**>(malloc(sizeof(snd_pcm_chmap_query_t*) * (kNumChannelMaps + 1)));
 
   if(!maps)
   {
     return nullptr;
   }
 
-  for(auto i{0}; i < std::size(kChannelMaps); ++i)
+  for(auto i{0}; i < kNumChannelMaps; ++i)
   {
     maps[i] = static_cast<snd_pcm_chmap_query_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + 3));
 
     if(maps[i] == nullptr)
     {
-      // snd_pcm_free_chmaps(maps);
-      // return nullptr;
+      snd_pcm_free_chmaps(maps);
+      return nullptr;
     }
 
     maps[i]->type = SND_CHMAP_TYPE_FIXED;
     maps[i]->map.channels = 2 + i;
-    memcpy(maps[i]->map.pos, kChannelMaps[i], maps[i]->map.channels);
+    memcpy(maps[i]->map.pos, kChannelMaps[i], maps[i]->map.channels * sizeof(kChannelMaps[i][0]));
   }
 
   maps[std::size(kChannelMaps)] = nullptr;
@@ -166,14 +168,14 @@ snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* ext ATTRIBUTE_UNUSED)
 snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  plugin->print("dxo_get_chmap");
 
   auto map = static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_query_t) + 3));
 
   if(map)
   {
+    const auto map_index = plugin->channels - 2;
     map->channels = plugin->channels;
-    memcpy(map->pos, kChannelMaps[plugin->channels - 2], plugin->channels);
+    memcpy(map->pos, kChannelMaps[map_index], plugin->channels * sizeof(kChannelMaps[map_index][0]));
   }
 
   return map;
