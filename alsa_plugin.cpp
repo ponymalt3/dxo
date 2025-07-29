@@ -15,12 +15,20 @@ snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io)
   return plugin->streamPos_ % (plugin->buffer_size / 2);
 }
 
+bool dxo_ensure_device_open(AlsaPluginDxO* plugin);
 snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
                                const snd_pcm_channel_area_t* src_areas,
                                snd_pcm_uframes_t src_offset,
                                snd_pcm_uframes_t size)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  if(!plugin->pcm_output_device_)
+  {
+    plugin->print("DEV not open!\r\n");
+    return -EBUSY;
+  }
+
+  plugin->print("out: %d\r\n", size);
 
   if(ext->format == SND_PCM_FORMAT_S16_LE)
   {
@@ -36,63 +44,71 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
   return size;
 }
 
-int dxo_prepare(snd_pcm_ioplug_t* ext)
+bool dxo_try_open_device(AlsaPluginDxO* plugin)
 {
-  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
-  plugin->print("dxo_prepare");
+  if(plugin->pcm_output_device_)
+  {
+    return true;
+  }
 
   int x = 0;
-  if((x = snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) < 0)
+  if((x = snd_pcm_open(&(plugin->pcm_output_device_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) <
+     0)
   {
     plugin->print("snd_pcm_open failed %s\n", snd_strerror(x));
 
-    if(snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
+    if(snd_pcm_open(&(plugin->pcm_output_device_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
     {
-      plugin->pcm_ = nullptr;
-      return -EBUSY;
+      plugin->pcm_output_device_ = nullptr;
+      return false;  //-EBUSY;
     }
   }
 
+  plugin->print("dxo_prepare: open Ok\r\n");
+
   snd_pcm_hw_params_alloca(&(plugin->params_));
-  snd_pcm_hw_params_any(plugin->pcm_, plugin->params_);
+  snd_pcm_hw_params_any(plugin->pcm_output_device_, plugin->params_);
   snd_pcm_hw_params_dump(plugin->params_, plugin->output_);
 
-  if(snd_pcm_hw_params_set_access(plugin->pcm_, plugin->params_, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
+  if(snd_pcm_hw_params_set_access(
+         plugin->pcm_output_device_, plugin->params_, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
   {
     plugin->print("snd_pcm_hw_params_set_access failed\n");
   }
 
-  if(snd_pcm_hw_params_set_format(plugin->pcm_, plugin->params_, SND_PCM_FORMAT_S16_LE) < 0)
+  if(snd_pcm_hw_params_set_format(plugin->pcm_output_device_, plugin->params_, SND_PCM_FORMAT_S16_LE) < 0)
   {
     plugin->print("snd_pcm_hw_params_set_format failed\n");
   }
 
-  if(snd_pcm_hw_params_set_channels(plugin->pcm_, plugin->params_, AlsaPluginDxO::kNumOutputChannels) < 0)
+  if(snd_pcm_hw_params_set_channels(
+         plugin->pcm_output_device_, plugin->params_, AlsaPluginDxO::kNumOutputChannels) < 0)
   {
     plugin->print("snd_pcm_hw_params_set_channels failed\n");
   }
 
   uint32_t rate = plugin->rate;
   std::cout << "rate: " << (rate) << std::endl;
-  if(snd_pcm_hw_params_set_rate_near(plugin->pcm_, plugin->params_, &rate, 0) < 0)
+  if(snd_pcm_hw_params_set_rate_near(plugin->pcm_output_device_, plugin->params_, &rate, 0) < 0)
   {
     plugin->print("snd_pcm_hw_params_set_rate_near failed\n");
   }
 
-  if(snd_pcm_hw_params_set_period_size(plugin->pcm_, plugin->params_, plugin->blockSize_, 0) < 0)
+  if(snd_pcm_hw_params_set_period_size(plugin->pcm_output_device_, plugin->params_, plugin->blockSize_, 0) <
+     0)
   {
     plugin->print("snd_pcm_hw_params_set_period_size failed\n");
   }
 
-  if(snd_pcm_hw_params(plugin->pcm_, plugin->params_) < 0)
+  if(snd_pcm_hw_params(plugin->pcm_output_device_, plugin->params_) < 0)
   {
     plugin->print("snd_pcm_hw_params failed\n");
-    snd_pcm_close(plugin->pcm_);
-    plugin->pcm_ = nullptr;
-    return -EINVAL;
+    snd_pcm_close(plugin->pcm_output_device_);
+    plugin->pcm_output_device_ = nullptr;
+    return false;  //-EINVAL;
   }
 
-  auto chMap = snd_pcm_get_chmap(plugin->pcm);
+  auto chMap = snd_pcm_get_chmap(plugin->pcm_output_device_);
 
   if(chMap)
   {
@@ -103,6 +119,14 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     plugin->print("\n");
   }
 
+  return true;  // 0;
+}
+
+int dxo_prepare(snd_pcm_ioplug_t* ext)
+{
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  plugin->print("dxo_prepare\r\n");
+  dxo_try_open_device(plugin);
   return 0;
 }
 
@@ -112,15 +136,17 @@ int dxo_close(snd_pcm_ioplug_t* ext)
 
   plugin->print("dxo_close\n");
   plugin->print("avg time: %f\n", plugin->totalTime_ / plugin->totalBlocks_);
+  snd_output_flush(plugin->output_);
+  snd_output_stdio_close(plugin->output_);
 
   delete plugin;
 
-  if(plugin->pcm_)
+  if(plugin->pcm_output_device_)
   {
-    snd_pcm_drain(plugin->pcm_);
-    snd_pcm_close(plugin->pcm_);
+    snd_pcm_drain(plugin->pcm_output_device_);
+    snd_pcm_close(plugin->pcm_output_device_);
     snd_output_close(plugin->output_);
-    plugin->pcm_ = nullptr;
+    plugin->pcm_output_device_ = nullptr;
   }
 
   return 0;
@@ -139,12 +165,15 @@ const int kNumChannelMaps = std::size(kChannelMaps);
 
 snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  plugin->print("dxo_query_chmaps\r\n");
 
   auto maps =
       static_cast<snd_pcm_chmap_query_t**>(malloc(sizeof(snd_pcm_chmap_query_t*) * (kNumChannelMaps + 1)));
 
   if(!maps)
   {
+    plugin->print("dxo_query_chmaps: malloc failed\r\n");
     return nullptr;
   }
 
@@ -166,12 +195,15 @@ snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 
   maps[kNumChannelMaps] = nullptr;
 
+  plugin->print("dxo_query_chmaps: Ok\r\n");
+
   return maps;
 }
 
 snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  plugin->print("dxo_get_chmap\r\n");
 
   auto map =
       static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_t) + sizeof(kChannelMaps[0].channels)));
@@ -182,6 +214,8 @@ snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
         std::min(std::max(static_cast<int32_t>(plugin->channels) - 2, 0), kNumChannelMaps - 1);
     map->channels = plugin->channels;
     memcpy(map->pos, kChannelMaps[map_index].channels.data(), sizeof(kChannelMaps[0].channels));
+
+    plugin->print("dxo_get_chmap: Ok\r\n");
   }
 
   return map;
@@ -337,6 +371,8 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   }
 
   *pcmp = plugin->pcm;
+
+  plugin->print("SND_PCM_PLUGIN_DEFINE_FUNC: Ok\r\n");
 
   return 0;
 }

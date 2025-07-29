@@ -70,14 +70,6 @@ public:
   {
   }
 
-  PcmBuffer(const PcmBuffer& cpy) : PcmBuffer(cpy.maxSize_)
-  {
-    this->addr_ = cpy.addr_;
-    this->step_ = cpy.step_;
-    this->size_ = cpy.size_;
-    this->maxSize_ = cpy.maxSize_;
-  }
-
   void store(const PcmStream<SampleType>& stream, uint32_t size)
   {
     memcpy(

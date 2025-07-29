@@ -36,7 +36,6 @@ public:
     memset(this, 0, sizeof(snd_pcm_ioplug_t));
 
     auto coeffs = loadFIRCoeffs(path);
-    std::cout << "coeffs: " << (coeffs.size()) << std::endl;
     assert(coeffs.size() == 7 && "Coeffs file need to provide 7 FIR transfer functions");
 
     std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
@@ -47,7 +46,6 @@ public:
                                                              {1, coeffs[5]},
                                                              {2, coeffs[6]}};
 
-    std::cout << "create Crossover: " << std::endl;
 
     crossover_ = std::make_unique<FirMultiChannelCrossover>(blockSize_, 3, config, 3);
 
@@ -61,7 +59,6 @@ public:
       outputs_[i] = crossover_->getOutputBuffer(i).data();
     }
 
-    std::cout << "Plugin created" << std::endl;
   }
 
   ~AlsaPluginDxO() {}
@@ -115,7 +112,7 @@ public:
   void print(const char* fmt, Args... args)
   {
     snd_output_printf(output_, fmt, args...);
-    snd_output_flush(output_);
+    // snd_output_flush(output_);
   }
 
   template <typename _InputSampleType>
@@ -172,7 +169,7 @@ public:
                             outputs_[4],
                             outputs_[5]);
 
-        auto result = snd_pcm_writei(pcm_, outputBuffer_.get(), blockSize_);
+        auto result = snd_pcm_writei(pcm_output_device_, outputBuffer_.get(), blockSize_);
 
         if(result != blockSize_)
         {
@@ -185,7 +182,7 @@ public:
             snd_output_printf(output_, "incomplete write %ld/%d\n", result, blockSize_);
           }
 
-          snd_pcm_recover(pcm_, result, 0);
+          snd_pcm_recover(pcm_output_device_, result, 0);
         }
 
         inputOffset_ = 0;
@@ -201,7 +198,7 @@ public:
   uint32_t inputOffset_{0};
   snd_output_t* output_{nullptr};
   std::unique_ptr<FirMultiChannelCrossover> crossover_;
-  snd_pcm_t* pcm_{nullptr};
+  snd_pcm_t* pcm_output_device_{nullptr};
   snd_pcm_hw_params_t* params_{nullptr};
   std::string pcmName_{};
   std::atomic<uint32_t> streamPos_{0};
