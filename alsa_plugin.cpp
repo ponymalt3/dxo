@@ -39,7 +39,7 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
 int dxo_prepare(snd_pcm_ioplug_t* ext)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
-  plugin->print("dxo_prepare");
+  plugin->print("dxo_prepare\r\n");
 
   int x = 0;
   if((x = snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) < 0)
@@ -52,6 +52,8 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
       return -EBUSY;
     }
   }
+
+  plugin->print("dxo_prepare: open Ok\r\n");
 
   snd_pcm_hw_params_alloca(&(plugin->params_));
   snd_pcm_hw_params_any(plugin->pcm_, plugin->params_);
@@ -139,12 +141,15 @@ const int kNumChannelMaps = std::size(kChannelMaps);
 
 snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  plugin->print("dxo_query_chmaps\r\n");
 
   auto maps =
       static_cast<snd_pcm_chmap_query_t**>(malloc(sizeof(snd_pcm_chmap_query_t*) * (kNumChannelMaps + 1)));
 
   if(!maps)
   {
+    plugin->print("dxo_query_chmaps: malloc failed\r\n");
     return nullptr;
   }
 
@@ -166,12 +171,15 @@ snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 
   maps[kNumChannelMaps] = nullptr;
 
+  plugin->print("dxo_query_chmaps: Ok\r\n");
+
   return maps;
 }
 
 snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  plugin->print("dxo_get_chmap\r\n");
 
   auto map =
       static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_t) + sizeof(kChannelMaps[0].channels)));
@@ -182,6 +190,8 @@ snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
         std::min(std::max(static_cast<int32_t>(plugin->channels) - 2, 0), kNumChannelMaps - 1);
     map->channels = plugin->channels;
     memcpy(map->pos, kChannelMaps[map_index].channels.data(), sizeof(kChannelMaps[0].channels));
+
+    plugin->print("dxo_get_chmap: Ok\r\n");
   }
 
   return map;
@@ -337,6 +347,8 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   }
 
   *pcmp = plugin->pcm;
+
+  plugin->print("SND_PCM_PLUGIN_DEFINE_FUNC: Ok\r\n");
 
   return 0;
 }
