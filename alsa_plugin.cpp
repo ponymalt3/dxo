@@ -15,12 +15,20 @@ snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io)
   return plugin->streamPos_ % (plugin->buffer_size / 2);
 }
 
+bool dxo_ensure_device_open(AlsaPluginDxO* plugin);
 snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
                                const snd_pcm_channel_area_t* src_areas,
                                snd_pcm_uframes_t src_offset,
                                snd_pcm_uframes_t size)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  if(!plugin->pcm_)
+  {
+    plugin->print("DEV not open!\r\n");
+    return -EBUSY;
+  }
+
+  plugin->print("out: %d\r\n", size);
 
   if(ext->format == SND_PCM_FORMAT_S16_LE)
   {
@@ -36,10 +44,12 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
   return size;
 }
 
-int dxo_prepare(snd_pcm_ioplug_t* ext)
+bool dxo_try_open_device(AlsaPluginDxO* plugin)
 {
-  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
-  plugin->print("dxo_prepare\r\n");
+  if(plugin->pcm_)
+  {
+    return true;
+  }
 
   int x = 0;
   if((x = snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) < 0)
@@ -49,7 +59,7 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     if(snd_pcm_open(&(plugin->pcm_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
     {
       plugin->pcm_ = nullptr;
-      return -EBUSY;
+      return false;  //-EBUSY;
     }
   }
 
@@ -91,7 +101,7 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     plugin->print("snd_pcm_hw_params failed\n");
     snd_pcm_close(plugin->pcm_);
     plugin->pcm_ = nullptr;
-    return -EINVAL;
+    return false;  //-EINVAL;
   }
 
   auto chMap = snd_pcm_get_chmap(plugin->pcm);
@@ -105,6 +115,14 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
     plugin->print("\n");
   }
 
+  return true;  // 0;
+}
+
+int dxo_prepare(snd_pcm_ioplug_t* ext)
+{
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  plugin->print("dxo_prepare\r\n");
+  dxo_try_open_device(plugin);
   return 0;
 }
 
