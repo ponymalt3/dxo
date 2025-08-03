@@ -44,11 +44,11 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
   return size;
 }
 
-bool dxo_try_open_device(AlsaPluginDxO* plugin)
+int dxo_try_open_device(AlsaPluginDxO* plugin)
 {
   if(plugin->pcm_output_device_)
   {
-    return true;
+    return 0;
   }
 
   int x = 0;
@@ -60,7 +60,7 @@ bool dxo_try_open_device(AlsaPluginDxO* plugin)
     if(snd_pcm_open(&(plugin->pcm_output_device_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
     {
       plugin->pcm_output_device_ = nullptr;
-      return false;  //-EBUSY;
+      return -EBUSY;
     }
   }
 
@@ -104,7 +104,7 @@ bool dxo_try_open_device(AlsaPluginDxO* plugin)
     plugin->print("snd_pcm_hw_params failed\n");
     snd_pcm_close(plugin->pcm_output_device_);
     plugin->pcm_output_device_ = nullptr;
-    return false;  //-EINVAL;
+    return -EINVAL;
   }
 
   auto chMap = snd_pcm_get_chmap(plugin->pcm_output_device_);
@@ -118,14 +118,15 @@ bool dxo_try_open_device(AlsaPluginDxO* plugin)
     plugin->print("\n");
   }
 
-  return true;  // 0;
+  return 0;
 }
 
 int dxo_prepare(snd_pcm_ioplug_t* ext)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
   plugin->print("dxo_prepare\r\n");
-  dxo_try_open_device(plugin);
+  plugin->streamPos_ = 0;
+  plugin->inputOffset_ = 0;
   return 0;
 }
 
@@ -371,7 +372,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
 
   plugin->print("SND_PCM_PLUGIN_DEFINE_FUNC: Ok\r\n");
 
-  return 0;
+  return dxo_try_open_device(plugin);
 }
 
 SND_PCM_PLUGIN_SYMBOL(dxo);
