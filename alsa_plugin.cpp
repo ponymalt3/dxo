@@ -15,17 +15,17 @@ snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io)
   return plugin->streamPos_ % (plugin->buffer_size / 2);
 }
 
-bool dxo_ensure_device_open(AlsaPluginDxO* plugin);
 snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
                                const snd_pcm_channel_area_t* src_areas,
                                snd_pcm_uframes_t src_offset,
                                snd_pcm_uframes_t size)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+
   if(!plugin->pcm_output_device_)
   {
     plugin->print("DEV not open!\r\n");
-    return -EBUSY;
+    return 0;
   }
 
   plugin->print("out: %d\r\n", size);
@@ -88,7 +88,6 @@ bool dxo_try_open_device(AlsaPluginDxO* plugin)
   }
 
   uint32_t rate = plugin->rate;
-  std::cout << "rate: " << (rate) << std::endl;
   if(snd_pcm_hw_params_set_rate_near(plugin->pcm_output_device_, plugin->params_, &rate, 0) < 0)
   {
     plugin->print("snd_pcm_hw_params_set_rate_near failed\n");
@@ -343,13 +342,13 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 16, 2 * 1024 * 1024) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 1024, 2 * 1024 * 1024) < 0)
   {
     plugin->print("SND_PCM_IOPLUG_HW_PERIOD_BYTES failed\n");
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_BUFFER_BYTES, 16, 2 * 1024 * 1024) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_BUFFER_BYTES, 1024, 2 * 1024 * 1024) < 0)
   {
     plugin->print("SND_PCM_IOPLUG_HW_BUFFER_BYTES failed\n");
     return -EINVAL;
@@ -362,7 +361,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIODS, 1, 1024) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIODS, 512, 1024) < 0)
   {
     plugin->print("SND_PCM_IOPLUG_HW_PERIODS failed\n");
     return -EINVAL;
