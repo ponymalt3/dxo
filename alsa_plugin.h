@@ -6,7 +6,6 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
-#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -141,8 +140,18 @@ public:
       if(inputOffset_ == blockSize_)
       {
         auto start = std::chrono::high_resolution_clock::now();
+        for(uint32_t i = 0; i < blockSize_; ++i)
+        {
+          print("%04X\n", static_cast<int>(inputs_[0][i]));
+        }
         memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
         memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
+        memcpy(outputs_[2], inputs_[0], sizeof(float) * blockSize_);
+        memcpy(outputs_[3], inputs_[1], sizeof(float) * blockSize_);
+        memcpy(outputs_[4], inputs_[0], sizeof(float) * blockSize_);
+        memcpy(outputs_[5], inputs_[1], sizeof(float) * blockSize_);
+        memcpy(outputs_[6], inputs_[2], sizeof(float) * blockSize_);
+
         // crossover_->updateInputs();
         auto end = std::chrono::high_resolution_clock::now();
 
@@ -183,7 +192,7 @@ public:
     return 0;
   }
 
-  uint32_t blockSize_{128};
+  uint32_t blockSize_{};
   std::vector<float*> inputs_{nullptr};
   std::vector<float*> outputs_{nullptr};
   uint32_t inputOffset_{0};
