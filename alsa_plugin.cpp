@@ -137,7 +137,7 @@ int dxo_close(snd_pcm_ioplug_t* ext)
   plugin->print("dxo_close\n");
   plugin->print("avg time: %f\n", plugin->totalTime_ / plugin->totalBlocks_);
   snd_output_flush(plugin->output_);
-  snd_output_stdio_close(plugin->output_);
+  snd_output_close(plugin->output_);
 
   delete plugin;
 
