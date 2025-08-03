@@ -302,7 +302,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize, 1024);
+  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize);
   plugin->callback = &callbacks;
   plugin->version = SND_PCM_IOPLUG_VERSION;
   plugin->name = "dxo";
@@ -342,13 +342,13 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 1024, 2 * 1024 * 1024) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 16 * 1024, 2 * 1024 * 1024) < 0)
   {
     plugin->print("SND_PCM_IOPLUG_HW_PERIOD_BYTES failed\n");
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_BUFFER_BYTES, 1024, 2 * 1024 * 1024) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_BUFFER_BYTES, 16, 2 * 1024 * 1024) < 0)
   {
     plugin->print("SND_PCM_IOPLUG_HW_BUFFER_BYTES failed\n");
     return -EINVAL;
@@ -361,7 +361,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIODS, 512, 1024) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIODS, 1, 1024) < 0)
   {
     plugin->print("SND_PCM_IOPLUG_HW_PERIODS failed\n");
     return -EINVAL;

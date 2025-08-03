@@ -21,13 +21,11 @@ class AlsaPluginDxO : public snd_pcm_ioplug_t
 public:
   enum
   {
-    kNumOutputChannels = 8,
-    kNumPeriods = 50
+    kNumOutputChannels = 8
   };
 
-  AlsaPluginDxO(const std::string& path, uint32_t blockSize, uint32_t periodSize)
+  AlsaPluginDxO(const std::string& path, uint32_t blockSize)
       : blockSize_(blockSize),
-        periodSize_(periodSize),
         inputs_(3),
         outputs_(7),
         inputOffset_(0),
@@ -46,7 +44,6 @@ public:
                                                              {1, coeffs[5]},
                                                              {2, coeffs[6]}};
 
-
     crossover_ = std::make_unique<FirMultiChannelCrossover>(blockSize_, 3, config, 3);
 
     for(auto i{0}; i < inputs_.size(); ++i)
@@ -58,7 +55,6 @@ public:
     {
       outputs_[i] = crossover_->getOutputBuffer(i).data();
     }
-
   }
 
   ~AlsaPluginDxO() {}
@@ -130,8 +126,6 @@ public:
       }
       else
       {
-        // std::cout << "  two channels" << std::endl;
-
         src.extractInterleaved(segmentSize, inputs_[0] + inputOffset_, inputs_[1] + inputOffset_);
 
         for(auto j{inputOffset_}; j < inputOffset_ + segmentSize; ++j)
@@ -146,17 +140,15 @@ public:
 
       if(inputOffset_ == blockSize_)
       {
-        // memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
-        // memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
-        //    snd_pcm_areas_copy(dst_areas, dst_offset, src_areas, src_offset, 2, blockSize_, 2);
         auto start = std::chrono::high_resolution_clock::now();
-        crossover_->updateInputs();
+        memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
+        memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
+        // crossover_->updateInputs();
         auto end = std::chrono::high_resolution_clock::now();
 
         double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() * 1e-9;
         totalTime_ += time_taken;
         ++totalBlocks_;
-        // std::cout << "time " << time_taken << std::setprecision(9) << " s" << std::endl;
 
         PcmStream<int16_t> dst(outputBuffer_.get(), kNumOutputChannels);
         dst.loadInterleaved(blockSize_,
@@ -192,7 +184,6 @@ public:
   }
 
   uint32_t blockSize_{128};
-  uint32_t periodSize_;
   std::vector<float*> inputs_{nullptr};
   std::vector<float*> outputs_{nullptr};
   uint32_t inputOffset_{0};
