@@ -6,7 +6,6 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
-#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -140,10 +139,12 @@ public:
 
       if(inputOffset_ == blockSize_)
       {
+        for(uint32_t i = 0; i < blockSize_; ++i)
+        {
+          print("%.6f\n", inputs_[0][i]);
+        }
         auto start = std::chrono::high_resolution_clock::now();
-        memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
-        memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
-        // crossover_->updateInputs();
+        crossover_->updateInputs();
         auto end = std::chrono::high_resolution_clock::now();
 
         double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() * 1e-9;
@@ -183,7 +184,7 @@ public:
     return 0;
   }
 
-  uint32_t blockSize_{128};
+  uint32_t blockSize_{};
   std::vector<float*> inputs_{nullptr};
   std::vector<float*> outputs_{nullptr};
   uint32_t inputOffset_{0};
