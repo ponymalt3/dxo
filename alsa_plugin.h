@@ -58,7 +58,7 @@ public:
 
   ~AlsaPluginDxO() {}
 
-  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path)
+  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path, float scale = (1 << 16))
   {
     std::ifstream file(path);
 
@@ -90,7 +90,7 @@ public:
         {
           double value = 0;
           iss >> value;
-          coeffs.push_back(static_cast<float>(value));
+          coeffs.push_back(static_cast<float>(value) * scale);
         }
 
         if(coeffs.size() > 0)
