@@ -22,12 +22,6 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
 
-  plugin->print("Tfirst: %d  Tstep: %d  Toff: %d  Fmt: %d\r\n",
-                src_areas->first,
-                src_areas->step,
-                src_offset,
-                ext->format);
-
   if(!plugin->pcm_output_device_)
   {
     plugin->print("DEV not open!\r\n");
@@ -57,17 +51,12 @@ int dxo_try_open_device(AlsaPluginDxO* plugin)
     return 0;
   }
 
-  int x = 0;
-  if((x = snd_pcm_open(&(plugin->pcm_output_device_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) <
-     0)
+  auto result =
+      snd_pcm_open(&(plugin->pcm_output_device_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0);
+  if(result < 0)
   {
-    plugin->print("snd_pcm_open failed %s\n", snd_strerror(x));
-
-    if(snd_pcm_open(&(plugin->pcm_output_device_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
-    {
-      plugin->pcm_output_device_ = nullptr;
-      return -EBUSY;
-    }
+    plugin->print("snd_pcm_open failed %s\n", snd_strerror(result));
+    return -EBUSY;
   }
 
   plugin->print("dxo_prepare: open Ok\r\n");
@@ -177,7 +166,6 @@ snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 
   if(!maps)
   {
-    plugin->print("dxo_query_chmaps: malloc failed\r\n");
     return nullptr;
   }
 
@@ -199,16 +187,12 @@ snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 
   maps[kNumChannelMaps] = nullptr;
 
-  plugin->print("dxo_query_chmaps: Ok\r\n");
-
   return maps;
 }
 
 snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  plugin->print("dxo_get_chmap\r\n");
-
   auto map =
       static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_t) + sizeof(kChannelMaps[0].channels)));
 
@@ -218,8 +202,6 @@ snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
         std::min(std::max(static_cast<int32_t>(plugin->channels) - 2, 0), kNumChannelMaps - 1);
     map->channels = plugin->channels;
     memcpy(map->pos, kChannelMaps[map_index].channels.data(), sizeof(kChannelMaps[0].channels));
-
-    plugin->print("dxo_get_chmap: Ok\r\n");
   }
 
   return map;
