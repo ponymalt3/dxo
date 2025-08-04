@@ -58,7 +58,7 @@ public:
 
   ~AlsaPluginDxO() {}
 
-  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path)
+  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path, float scale = (1 << 16))
   {
     std::ifstream file(path);
 
@@ -90,7 +90,7 @@ public:
         {
           double value = 0;
           iss >> value;
-          coeffs.push_back(static_cast<float>(value));
+          coeffs.push_back(static_cast<float>(value) * scale);
         }
 
         if(coeffs.size() > 0)
@@ -139,10 +139,6 @@ public:
 
       if(inputOffset_ == blockSize_)
       {
-        for(uint32_t i = 0; i < blockSize_; ++i)
-        {
-          print("%.6f\n", inputs_[0][i]);
-        }
         auto start = std::chrono::high_resolution_clock::now();
         crossover_->updateInputs();
         auto end = std::chrono::high_resolution_clock::now();

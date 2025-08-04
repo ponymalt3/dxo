@@ -4,6 +4,22 @@
 #include <alsa/pcm_external.h>
 #include <stdint.h>
 
+#include <cmath>
+#include <type_traits>
+
+template <typename SrcType, typename DstType>
+inline DstType convert(SrcType sample)
+{
+  DstType new_sample{sample};
+  return new_sample;
+}
+
+template <>
+inline float convert<int16_t, float>(int16_t sample)
+{
+  return std::ldexp(static_cast<float>(sample), -16);
+}
+
 template <typename SampleType>
 class PcmStream
 {
