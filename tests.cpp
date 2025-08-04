@@ -22,7 +22,6 @@ public:
 
   void setData(uint32_t offset, std::initializer_list<SampleType> data)
   {
-    auto i{0};
     for(auto d : data)
     {
       reinterpret_cast<SampleType*>(addr)[offset * step / (sizeof(SampleType) * 8)] = d;
@@ -48,40 +47,32 @@ class PcmStreamTest : public testing::Test
 protected:
   PcmStreamTest()
   {
-    buffer1 = new int16_t[3 * 256];
-    buffer2 = new int32_t[8 * 256];
-
-    linear = {Channel<int16_t>(buffer1 + 0, 256, 1),
+    /*linear = {Channel<int16_t>(buffer1 + 0, 256, 1),
               Channel<int16_t>(buffer1 + 256, 256, 1),
-              Channel<int16_t>(buffer1 + 512, 256, 1)};
-
-    interleaved = {Channel<int32_t>(buffer2 + 0, 256, 8),
-                   Channel<int32_t>(buffer2 + 1, 256, 8),
-                   Channel<int32_t>(buffer2 + 2, 256, 8),
-                   Channel<int32_t>(buffer2 + 3, 256, 8),
-                   Channel<int32_t>(buffer2 + 4, 256, 8),
-                   Channel<int32_t>(buffer2 + 5, 256, 8),
-                   Channel<int32_t>(buffer2 + 6, 256, 8),
-                   Channel<int32_t>(buffer2 + 7, 256, 8)};
+              Channel<int16_t>(buffer1 + 512, 256, 1)};*/
   }
 
-  ~PcmStreamTest()
+  template <typename T>
+  std::vector<Channel<T>> GetInterleavedData()
   {
-    linear.clear();
-    interleaved.clear();
-
-    delete[] buffer1;
-    delete[] buffer2;
+    auto* typed_buffer = reinterpret_cast<T*>(buffer);
+    return {Channel<T>(typed_buffer + 0, 256, 8),
+            Channel<T>(typed_buffer + 1, 256, 8),
+            Channel<T>(typed_buffer + 2, 256, 8),
+            Channel<T>(typed_buffer + 3, 256, 8),
+            Channel<T>(typed_buffer + 4, 256, 8),
+            Channel<T>(typed_buffer + 5, 256, 8),
+            Channel<T>(typed_buffer + 6, 256, 8),
+            Channel<T>(typed_buffer + 7, 256, 8)};
   }
 
-  int16_t* buffer1;
-  int32_t* buffer2;
-  std::vector<Channel<int16_t>> linear;
-  std::vector<Channel<int32_t>> interleaved;
+  uint8_t buffer[4 * 8 * 256];  // 8192
 };
 
 TEST_F(PcmStreamTest, Test_InterleavedExtract)
 {
+  auto interleaved = GetInterleavedData<int32_t>();
+
   float ch1[16], ch2[16], ch3[16], ch4[16], ch5[16], ch6[16], ch7[16], ch8[16];
 
   int32_t i = 0;
@@ -103,8 +94,42 @@ TEST_F(PcmStreamTest, Test_InterleavedExtract)
   EXPECT_EQ(ch8[0], 28);
 }
 
+TEST_F(PcmStreamTest, Test_InterleavedExtractScaling)
+{
+  constexpr auto value = 17;
+
+  {
+    auto interleaved = GetInterleavedData<int32_t>();
+    interleaved[0].setData(0, {value});
+    PcmStream<int32_t> stream(interleaved.data(), 0);
+    float extract;
+    stream.extractInterleaved(1U, &extract);
+    EXPECT_FLOAT_EQ(extract, static_cast<float>(value));
+  }
+
+  {
+    auto interleaved = GetInterleavedData<int16_t>();
+    interleaved[0].setData(0, {value});
+    PcmStream<int16_t> stream(interleaved.data(), 0);
+    float extract;
+    stream.extractInterleaved(1U, &extract);
+    EXPECT_EQ(extract, static_cast<float>(value) / 65536);
+  }
+
+  {
+    auto interleaved = GetInterleavedData<float>();
+    interleaved[0].setData(0, {value});
+    PcmStream<float> stream(interleaved.data(), 0);
+    float extract;
+    stream.extractInterleaved(1U, &extract);
+    EXPECT_EQ(extract, value);
+  }
+}
+
 TEST_F(PcmStreamTest, Test_InterleavedLoad)
 {
+  auto interleaved = GetInterleavedData<int32_t>();
+
   float ch1[3] = {1.0f, 2.0f, 3.0f};
   float ch2[3] = {4.0f, 5.0f, 6.0f};
   float ch3[3] = {7.0f, 8.0f, 9.0f};
@@ -129,6 +154,8 @@ TEST_F(PcmStreamTest, Test_InterleavedLoad)
 
 TEST_F(PcmStreamTest, Test_PcmBuffer)
 {
+  auto interleaved = GetInterleavedData<int32_t>();
+
   float ch1[8][4];
   float ch2[8][4];
 
