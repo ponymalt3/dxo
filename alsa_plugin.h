@@ -139,6 +139,11 @@ public:
 
       if(inputOffset_ == blockSize_)
       {
+        print("input:\n");
+        for(auto i{0}; i < blockSize_; ++i)
+        {
+          print("%.6f\n", inputs_[0][i]);
+        }
         auto start = std::chrono::high_resolution_clock::now();
         crossover_->updateInputs();
         auto end = std::chrono::high_resolution_clock::now();
@@ -159,6 +164,12 @@ public:
                             outputs_[5]);
 
         auto result = snd_pcm_writei(pcm_output_device_, outputBuffer_.get(), blockSize_);
+
+        print("output:\n");
+        for(auto i{0}; i < blockSize_; ++i)
+        {
+          print("%.6f\n", outputs_[0][i]);
+        }
 
         if(result != blockSize_)
         {
