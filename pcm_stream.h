@@ -7,18 +7,18 @@
 #include <cmath>
 #include <type_traits>
 
-template <typename SrcType, typename DstType>
+template <typename DstType, typename SrcType>
 inline DstType convert(SrcType sample)
 {
   DstType new_sample{sample};
   return new_sample;
 }
 
-template <>
-inline float convert<int16_t, float>(int16_t sample)
+/*template <>
+inline float convert<float, int16_t>(int16_t sample)
 {
   return std::ldexp(static_cast<float>(sample), -16);
-}
+}*/
 
 template <typename SampleType>
 class PcmStream
@@ -47,7 +47,7 @@ public:
 
     while(src < srcMax)
     {
-      ((*args++ = *src++), ...);
+      ((*args++ = convert<std::remove_reference_t<decltype(*args)>>(*src++)), ...);
     }
 
     addr_ = srcMax;
@@ -61,7 +61,7 @@ public:
 
     while(src < srcMax)
     {
-      ((*src++ = *args++), ...);
+      ((*src++ = convert<std::remove_reference_t<decltype(*src)>>(*args++)), ...);
     }
 
     addr_ = srcMax;
