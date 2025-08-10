@@ -55,6 +55,7 @@ int dxo_try_open_device(AlsaPluginDxO* plugin)
       snd_pcm_open(&(plugin->pcm_output_device_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0);
   if(result < 0)
   {
+    plugin->pcm_output_device_ = nullptr;
     plugin->print("snd_pcm_open failed %s\n", snd_strerror(result));
     return -EBUSY;
   }
@@ -120,8 +121,8 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
   plugin->print("dxo_prepare\r\n");
-  plugin->streamPos_ = 0;
-  plugin->inputOffset_ = 0;
+  // plugin->streamPos_ = 0;
+  // plugin->inputOffset_ = 0;
   return 0;
 }
 
@@ -156,7 +157,7 @@ static const ChannelMap kChannelMaps[] = {{2, {SND_CHMAP_FL, SND_CHMAP_FR, 0U}},
                                           {3, {SND_CHMAP_FL, SND_CHMAP_FR, SND_CHMAP_LFE}}};
 const int kNumChannelMaps = std::size(kChannelMaps);
 
-snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
+snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
   plugin->print("dxo_query_chmaps\r\n");
