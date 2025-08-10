@@ -32,7 +32,7 @@ public:
   {
     memset(this, 0, sizeof(snd_pcm_ioplug_t));
 
-    auto coeffs = loadFIRCoeffs(path);
+    auto coeffs = loadFIRCoeffs(path, 1.0f);
     assert(coeffs.size() == 7 && "Coeffs file need to provide 7 FIR transfer functions");
 
     std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
@@ -139,8 +139,15 @@ public:
 
       if(inputOffset_ == blockSize_)
       {
+        /*print("input:\n");
+        for(auto i{0}; i < blockSize_; ++i)
+        {
+          print("%.6f\n", inputs_[0][i]);
+        }*/
         auto start = std::chrono::high_resolution_clock::now();
-        crossover_->updateInputs();
+        memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
+        memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
+        // crossover_->updateInputs();
         auto end = std::chrono::high_resolution_clock::now();
 
         double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() * 1e-9;
@@ -159,6 +166,12 @@ public:
                             outputs_[5]);
 
         auto result = snd_pcm_writei(pcm_output_device_, outputBuffer_.get(), blockSize_);
+
+        /*print("output:\n");
+        for(auto i{0}; i < blockSize_; ++i)
+        {
+          print("%.6f\n", outputs_[0][i]);
+        }*/
 
         if(result != blockSize_)
         {
