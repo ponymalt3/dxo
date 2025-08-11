@@ -14,11 +14,11 @@ inline DstType convert(SrcType sample)
   return new_sample;
 }
 
-/*template <>
+template <>
 inline float convert<float, int16_t>(int16_t sample)
 {
   return std::ldexp(static_cast<float>(sample), -16);
-}*/
+}
 
 template <typename SampleType>
 class PcmStream

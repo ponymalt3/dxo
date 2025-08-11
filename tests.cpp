@@ -113,7 +113,7 @@ TEST_F(PcmStreamTest, Test_InterleavedExtractScaling)
     PcmStream<int16_t> stream(interleaved.data(), 0);
     float extract;
     stream.extractInterleaved(1U, &extract);
-    EXPECT_EQ(extract, static_cast<float>(value));  // / 65536);
+    EXPECT_EQ(extract, static_cast<float>(value) / 65536);
   }
 
   {

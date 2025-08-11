@@ -121,7 +121,6 @@ int dxo_prepare(snd_pcm_ioplug_t* ext)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
   plugin->print("dxo_prepare\r\n");
-  dxo_try_open_device(plugin);
   plugin->streamPos_ = 0;
   plugin->inputOffset_ = 0;
   return 0;
@@ -192,7 +191,7 @@ snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io)
   return maps;
 }
 
-snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
+snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
   auto map =
@@ -209,12 +208,29 @@ snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io ATTRIBUTE_UNUSED)
   return map;
 }
 
+int dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params)
+{
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+
+  plugin->print("dxo_hw_params\r\n");
+
+  snd_pcm_hw_params_get_rate(params, &plugin->rate, 0);
+  snd_pcm_hw_params_get_channels(params, &plugin->channels);
+  snd_pcm_hw_params_get_format(params, &plugin->format);
+  snd_pcm_hw_params_get_period_size(params, &plugin->period_size, 0);
+  snd_pcm_hw_params_get_buffer_size(params, &plugin->buffer_size);
+  snd_pcm_hw_params_get_access(params, &plugin->access);
+
+  return dxo_try_open_device(plugin);
+}
+
 static const snd_pcm_ioplug_callback_t callbacks = {
     .start = [](snd_pcm_ioplug_t*) { return 0; },
     .stop = [](snd_pcm_ioplug_t*) { return 0; },
     .pointer = dxo_pointer,
     .transfer = dxo_transfer,
     .close = dxo_close,
+    .hw_params = dxo_hw_params,
     .prepare = dxo_prepare,
 #if SND_PCM_EXTPLUG_VERSION >= 0x10002
     .query_chmaps = dxo_query_chmaps,
