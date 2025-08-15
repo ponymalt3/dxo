@@ -17,7 +17,7 @@ inline DstType convert(SrcType sample)
 template <>
 inline float convert<float, int16_t>(int16_t sample)
 {
-  return std::ldexp(static_cast<float>(sample), -16);
+  return std::ldexp(static_cast<float>(sample), -15);
 }
 
 template <typename SampleType>

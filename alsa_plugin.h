@@ -32,7 +32,7 @@ public:
   {
     memset(this, 0, sizeof(snd_pcm_ioplug_t));
 
-    auto coeffs = loadFIRCoeffs(path, 1.0f);
+    auto coeffs = loadFIRCoeffs(path, 32768.0f);
     assert(coeffs.size() == 7 && "Coeffs file need to provide 7 FIR transfer functions");
 
     std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
@@ -56,9 +56,7 @@ public:
     }
   }
 
-  ~AlsaPluginDxO() {}
-
-  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path, float scale = (1 << 16))
+  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path, float scale = (1 << 15))
   {
     std::ifstream file(path);
 
@@ -110,8 +108,37 @@ public:
     // snd_output_flush(output_);
   }
 
-  template <typename _InputSampleType>
-  uint32_t update(PcmStream<_InputSampleType>& src, uint32_t size, bool hasLFE)
+  bool alsa_writer(const int16_t* data, const uint32_t frames)
+  {
+    auto result = snd_pcm_writei(pcm_output_device_, data, frames);
+
+    /*print("output:\n");
+    for(auto i{0}; i < blockSize_; ++i)
+    {
+      print("%.6f\n", outputs_[0][i]);
+    }*/
+
+    if(result != frames)
+    {
+      if(result < 0)
+      {
+        snd_output_printf(output_, "write error [%s]\n", snd_strerror(result));
+      }
+      else
+      {
+        snd_output_printf(output_, "incomplete write %ld/%d\n", result, frames);
+      }
+
+      snd_pcm_recover(pcm_output_device_, result, 0);
+
+      return false;
+    }
+
+    return true;
+  }
+
+  template <typename _InputSampleType, typename _LambdaType>
+  uint32_t update(PcmStream<_InputSampleType>& src, uint32_t size, bool hasLFE, _LambdaType alsa_writer)
   {
     auto i{0U};
     while(i < size)
@@ -147,6 +174,12 @@ public:
         auto start = std::chrono::high_resolution_clock::now();
         memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
         memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
+        memcpy(outputs_[2], inputs_[0], sizeof(float) * blockSize_);
+        memcpy(outputs_[3], inputs_[1], sizeof(float) * blockSize_);
+        memcpy(outputs_[4], inputs_[0], sizeof(float) * blockSize_);
+        memcpy(outputs_[5], inputs_[1], sizeof(float) * blockSize_);
+        memcpy(outputs_[6], inputs_[0], sizeof(float) * blockSize_);
+        memcpy(outputs_[7], inputs_[1], sizeof(float) * blockSize_);
         // crossover_->updateInputs();
         auto end = std::chrono::high_resolution_clock::now();
 
@@ -165,31 +198,12 @@ public:
                             outputs_[4],
                             outputs_[5]);
 
-        auto result = snd_pcm_writei(pcm_output_device_, outputBuffer_.get(), blockSize_);
-
-        /*print("output:\n");
-        for(auto i{0}; i < blockSize_; ++i)
-        {
-          print("%.6f\n", outputs_[0][i]);
-        }*/
-
-        if(result != blockSize_)
-        {
-          if(result < 0)
-          {
-            snd_output_printf(output_, "write error [%s]\n", snd_strerror(result));
-          }
-          else
-          {
-            snd_output_printf(output_, "incomplete write %ld/%d\n", result, blockSize_);
-          }
-
-          snd_pcm_recover(pcm_output_device_, result, 0);
-        }
+        alsa_writer(outputBuffer_.get(), blockSize_);
 
         inputOffset_ = 0;
       }
     }
+
     return 0;
   }
 

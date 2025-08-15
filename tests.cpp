@@ -113,7 +113,7 @@ TEST_F(PcmStreamTest, Test_InterleavedExtractScaling)
     PcmStream<int16_t> stream(interleaved.data(), 0);
     float extract;
     stream.extractInterleaved(1U, &extract);
-    EXPECT_EQ(extract, static_cast<float>(value) / 65536);
+    EXPECT_EQ(extract, static_cast<float>(value) / 32768);
   }
 
   {
@@ -187,6 +187,22 @@ class AlsaPluginTest : public testing::Test
 {
 public:
   void sleepFor(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+
+  template <typename T>
+  std::vector<Channel<T>> GetInterleavedData(uint32_t channels = 2, uint32_t step_offset = 0)
+  {
+    mem_.push_back(std::make_unique<unsigned char[]>(256 * 4 * sizeof(T)));
+    auto* typed_buffer = reinterpret_cast<T*>(mem_.back().get());
+    std::vector<Channel<T>> result{};
+    for(auto i{0}; i < channels; ++i)
+    {
+      result.push_back(Channel<T>(typed_buffer + i, 256, channels + step_offset));
+    }
+    return result;
+  }
+
+  AlsaPluginDxO plugin{"coeffs_reduced", 256};
+  std::vector<std::unique_ptr<unsigned char[]>> mem_;
 };
 
 TEST_F(AlsaPluginTest, Test_LoadCoefficents)
@@ -198,4 +214,30 @@ TEST_F(AlsaPluginTest, Test_LoadCoefficents)
   {
     EXPECT_EQ(4096, filter.size());
   }
+}
+
+TEST_F(AlsaPluginTest, Test_PluginUpdate)
+{
+  auto interleaved = GetInterleavedData<float>(2);
+  for(auto i{0}; i < 256; ++i)
+  {
+    interleaved[0].setData(i, {static_cast<float>(i)});
+    interleaved[1].setData(i, {static_cast<float>(i) + 256});
+  }
+  PcmStream<float> stream(interleaved.data(), 0);
+
+  const auto test_writer = [&interleaved](const int16_t* data, uint32_t frames) {
+    ASSERT_EQ(frames, 256);
+    auto ch0 = interleaved.data()[0].getData(0, frames);
+    auto ch1 = interleaved.data()[1].getData(0, frames);
+
+    for(auto i{0}; i < frames; ++i)
+    {
+      auto index = i * AlsaPluginDxO::kNumOutputChannels;
+      EXPECT_EQ(data[index + 0], static_cast<int16_t>(ch0[i] * 32768));
+      EXPECT_EQ(data[index + 1], static_cast<int16_t>(ch1[i] * 32768));
+    }
+  };
+
+  plugin.update(stream, 256, false, test_writer);
 }

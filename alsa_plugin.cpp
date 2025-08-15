@@ -30,15 +30,19 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
 
   plugin->print("out: %d\r\n", size);
 
+  const auto writer = [plugin](const int16_t* data, uint32_t frames) {
+    return plugin->alsa_writer(data, frames);
+  };
+
   if(ext->format == SND_PCM_FORMAT_S16_LE)
   {
     PcmStream<int16_t> src(src_areas, src_offset);
-    plugin->update(src, size, ext->channels == 3);
+    plugin->update(src, size, ext->channels == 3, writer);
   }
   else if(ext->format == SND_PCM_FORMAT_FLOAT_LE)
   {
     PcmStream<float> src(src_areas, src_offset);
-    plugin->update(src, size, ext->channels == 3);
+    plugin->update(src, size, ext->channels == 3, writer);
   }
 
   return size;
@@ -64,7 +68,7 @@ int dxo_try_open_device(AlsaPluginDxO* plugin)
 
   snd_pcm_hw_params_alloca(&(plugin->params_));
   snd_pcm_hw_params_any(plugin->pcm_output_device_, plugin->params_);
-  snd_pcm_hw_params_dump(plugin->params_, plugin->output_);
+  // snd_pcm_hw_params_dump(plugin->params_, plugin->output_);
 
   if(snd_pcm_hw_params_set_access(
          plugin->pcm_output_device_, plugin->params_, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
