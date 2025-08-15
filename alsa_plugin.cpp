@@ -3,51 +3,167 @@
 
 #include <alsa/asoundlib.h>
 #include <alsa/pcm_external.h>
-#include <stdint.h>
 
-#include <array>
+AlsaPluginDxO::AlsaPluginDxO(const std::string& path,
+                             uint32_t blockSize,
+                             const std::string slavePcm,
+                             const snd_pcm_ioplug_callback_t* callbacks)
+    : blockSize_(blockSize),
+      inputs_(3),
+      outputs_(7),
+      inputOffset_(0),
+      outputBuffer_{new int16_t[blockSize_ * kNumOutputChannels]},
+      pcmName_(slavePcm)
+{
+  memset(this, 0, sizeof(snd_pcm_ioplug_t));
+
+  // Init ALSA structure
+  snd_pcm_ioplug_t::version = SND_PCM_IOPLUG_VERSION;
+  snd_pcm_ioplug_t::name = "dxo";
+  snd_pcm_ioplug_t::private_data = this;
+  snd_pcm_ioplug_t::callback = callbacks;
+
+  auto coeffs = loadFIRCoeffs(path, kScaleS16LE);
+  assert(coeffs.size() == 7 && "Coeffs file need to provide 7 FIR transfer functions");
+
+  std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
+                                                           {0, coeffs[1]},
+                                                           {0, coeffs[2]},
+                                                           {1, coeffs[3]},
+                                                           {1, coeffs[4]},
+                                                           {1, coeffs[5]},
+                                                           {2, coeffs[6]}};
+
+  crossover_ = std::make_unique<FirMultiChannelCrossover>(blockSize_, 3, config, 3);
+
+  for(auto i{0}; i < inputs_.size(); ++i)
+  {
+    inputs_[i] = crossover_->getInputBuffer(i).data();
+  }
+
+  for(auto i{0}; i < outputs_.size(); ++i)
+  {
+    outputs_[i] = crossover_->getOutputBuffer(i).data();
+  }
+}
+
+std::vector<std::vector<float>> AlsaPluginDxO::loadFIRCoeffs(const std::string& path, float scale)
+{
+  std::ifstream file(path);
+
+  if(!file)
+  {
+    throw std::invalid_argument("Error: loadFIRCoeffs with " + path + " failed!");
+  }
+
+  std::vector<std::vector<float>> filters;
+  while(!file.eof())
+  {
+    std::string line;
+    while(std::getline(file, line))
+    {
+      uint32_t posNotWhiteSpace = 0;
+      while(std::isspace(line[posNotWhiteSpace]))
+      {
+        ++posNotWhiteSpace;
+      }
+
+      if(line.substr(posNotWhiteSpace).starts_with('#') || line.length() == posNotWhiteSpace)
+      {
+        continue;
+      }
+
+      std::vector<float> coeffs;
+      std::istringstream iss(line);
+      while(!iss.eof())
+      {
+        double value = 0;
+        iss >> value;
+        coeffs.push_back(static_cast<float>(value) * scale);
+      }
+
+      if(coeffs.size() > 0)
+      {
+        filters.push_back(coeffs);
+      }
+    }
+  }
+
+  return filters;
+}
+
+void AlsaPluginDxO::enableLogging()
+{
+#ifdef BUILD_ARM
+  logging_.open("/storage/dxo.txt", std::ios::app | std::ios::out);
+#else
+  logging_.open("/home/malte/dxo.txt", std::ios::app | std::ios::out);
+#endif
+}
+
+bool AlsaPluginDxO::writePcm(const int16_t* data, const uint32_t frames)
+{
+  auto result = snd_pcm_writei(pcm_output_device_, data, frames);
+
+  if(result != frames)
+  {
+    if(result < 0)
+    {
+      snd_output_printf(output_, "write error [%s]", snd_strerror(result));
+    }
+    else
+    {
+      snd_output_printf(output_, "incomplete write %ld/%d", result, frames);
+    }
+
+    snd_pcm_recover(pcm_output_device_, result, 0);
+
+    return false;
+  }
+
+  return true;
+}
 
 extern "C" {
 
-snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io)
+snd_pcm_sframes_t AlsaPluginDxO::dxo_pointer(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
   return plugin->streamPos_ % (plugin->buffer_size / 2);
 }
 
-snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
-                               const snd_pcm_channel_area_t* src_areas,
-                               snd_pcm_uframes_t src_offset,
-                               snd_pcm_uframes_t size)
+snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
+                                              const snd_pcm_channel_area_t* src_areas,
+                                              snd_pcm_uframes_t src_offset,
+                                              snd_pcm_uframes_t size)
 {
-  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
 
   if(!plugin->pcm_output_device_)
   {
-    plugin->print("DEV not open!\r\n");
+    plugin->print("Device not opened!");
     return -EBUSY;
   }
 
-
   const auto writer = [plugin](const int16_t* data, uint32_t frames) {
-    return plugin->alsa_writer(data, frames);
+    return plugin->writePcm(data, frames);
   };
 
-  if(ext->format == SND_PCM_FORMAT_S16_LE)
+  if(io->format == SND_PCM_FORMAT_S16_LE)
   {
     PcmStream<int16_t> src(src_areas, src_offset);
-    plugin->update(src, size, ext->channels == 3, writer);
+    plugin->update(src, size, io->channels == 3, writer);
   }
-  else if(ext->format == SND_PCM_FORMAT_FLOAT_LE)
+  else if(io->format == SND_PCM_FORMAT_FLOAT_LE)
   {
     PcmStream<float> src(src_areas, src_offset);
-    plugin->update(src, size, ext->channels == 3, writer);
+    plugin->update(src, size, io->channels == 3, writer);
   }
 
   return size;
 }
 
-int dxo_try_open_device(AlsaPluginDxO* plugin)
+int AlsaPluginDxO::dxo_try_open_device(AlsaPluginDxO* plugin)
 {
   if(plugin->pcm_output_device_)
   {
@@ -56,14 +172,13 @@ int dxo_try_open_device(AlsaPluginDxO* plugin)
 
   auto result =
       snd_pcm_open(&(plugin->pcm_output_device_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0);
+
   if(result < 0)
   {
     plugin->pcm_output_device_ = nullptr;
-    plugin->print("snd_pcm_open failed %s\n", snd_strerror(result));
+    plugin->print("snd_pcm_open failed ", snd_strerror(result));
     return -EBUSY;
   }
-
-  plugin->print("dxo_prepare: open Ok\r\n");
 
   snd_pcm_hw_params_alloca(&(plugin->params_));
   snd_pcm_hw_params_any(plugin->pcm_output_device_, plugin->params_);
@@ -72,35 +187,35 @@ int dxo_try_open_device(AlsaPluginDxO* plugin)
   if(snd_pcm_hw_params_set_access(
          plugin->pcm_output_device_, plugin->params_, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
   {
-    plugin->print("snd_pcm_hw_params_set_access failed\n");
+    plugin->print("snd_pcm_hw_params_set_access failed");
   }
 
   if(snd_pcm_hw_params_set_format(plugin->pcm_output_device_, plugin->params_, SND_PCM_FORMAT_S16_LE) < 0)
   {
-    plugin->print("snd_pcm_hw_params_set_format failed\n");
+    plugin->print("snd_pcm_hw_params_set_format failed");
   }
 
   if(snd_pcm_hw_params_set_channels(
          plugin->pcm_output_device_, plugin->params_, AlsaPluginDxO::kNumOutputChannels) < 0)
   {
-    plugin->print("snd_pcm_hw_params_set_channels failed\n");
+    plugin->print("snd_pcm_hw_params_set_channels failed");
   }
 
   uint32_t rate = plugin->rate;
   if(snd_pcm_hw_params_set_rate_near(plugin->pcm_output_device_, plugin->params_, &rate, 0) < 0)
   {
-    plugin->print("snd_pcm_hw_params_set_rate_near failed\n");
+    plugin->print("snd_pcm_hw_params_set_rate_near failed");
   }
 
   if(snd_pcm_hw_params_set_period_size(plugin->pcm_output_device_, plugin->params_, plugin->blockSize_, 0) <
      0)
   {
-    plugin->print("snd_pcm_hw_params_set_period_size failed\n");
+    plugin->print("snd_pcm_hw_params_set_period_size failed");
   }
 
   if(snd_pcm_hw_params(plugin->pcm_output_device_, plugin->params_) < 0)
   {
-    plugin->print("snd_pcm_hw_params failed\n");
+    plugin->print("snd_pcm_hw_params failed");
     snd_pcm_close(plugin->pcm_output_device_);
     plugin->pcm_output_device_ = nullptr;
     return -EINVAL;
@@ -110,33 +225,31 @@ int dxo_try_open_device(AlsaPluginDxO* plugin)
 
   if(chMap)
   {
-    //{kChFL, kChFR, kChRL, kChRR, kChUnknown, kChLFE, kChSL, kChSR}
     for(auto i{0}; i < chMap[0].channels; ++i)
     {
-      plugin->print("CHMAP[%d]: %d\n", i, chMap[0].pos[i]);
-      // plugin->channelMap_[AlsaPluginDxO::kMapAlsaChannel[chMap[0].pos[i]]] = i;
+      plugin->print("CHMAP[", i, "]: ", chMap[0].pos[i]);
+      plugin->channelMap_[i] = kMapAlsaChannel[chMap[0].pos[i]];
     }
-    plugin->print("\n");
   }
 
   return 0;
 }
 
-int dxo_prepare(snd_pcm_ioplug_t* ext)
+int AlsaPluginDxO::dxo_prepare(snd_pcm_ioplug_t* io)
 {
-  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
-  plugin->print("dxo_prepare\r\n");
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  plugin->print("dxo_prepare");
   plugin->streamPos_ = 0;
   plugin->inputOffset_ = 0;
   return 0;
 }
 
-int dxo_close(snd_pcm_ioplug_t* ext)
+int AlsaPluginDxO::dxo_close(snd_pcm_ioplug_t* io)
 {
-  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(ext);
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
 
-  plugin->print("dxo_close\n");
-  plugin->print("avg time: %f\n", plugin->totalTime_ / plugin->totalBlocks_);
+  plugin->print("dxo_close");
+  plugin->print("avg time: ", plugin->totalTime_ / plugin->totalBlocks_);
 
   if(plugin->pcm_output_device_)
   {
@@ -162,10 +275,10 @@ static const ChannelMap kChannelMaps[] = {{2, {SND_CHMAP_FL, SND_CHMAP_FR, 0U}},
                                           {3, {SND_CHMAP_FL, SND_CHMAP_FR, SND_CHMAP_LFE}}};
 const int kNumChannelMaps = std::size(kChannelMaps);
 
-snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io)
+snd_pcm_chmap_query_t** AlsaPluginDxO::dxo_query_chmaps(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  plugin->print("dxo_query_chmaps\r\n");
+  plugin->print("dxo_query_chmaps");
 
   auto maps =
       static_cast<snd_pcm_chmap_query_t**>(malloc(sizeof(snd_pcm_chmap_query_t*) * (kNumChannelMaps + 1)));
@@ -196,9 +309,10 @@ snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io)
   return maps;
 }
 
-snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io)
+snd_pcm_chmap_t* AlsaPluginDxO::dxo_get_chmap(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+
   auto map =
       static_cast<snd_pcm_chmap_t*>(malloc(sizeof(snd_pcm_chmap_t) + sizeof(kChannelMaps[0].channels)));
 
@@ -213,11 +327,10 @@ snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io)
   return map;
 }
 
-int dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params)
+int AlsaPluginDxO::dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-
-  plugin->print("dxo_hw_params\r\n");
+  plugin->print("dxo_hw_params");
 
   snd_pcm_hw_params_get_rate(params, &plugin->rate, 0);
   snd_pcm_hw_params_get_channels(params, &plugin->channels);
@@ -232,14 +345,14 @@ int dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params)
 static const snd_pcm_ioplug_callback_t callbacks = {
     .start = [](snd_pcm_ioplug_t*) { return 0; },
     .stop = [](snd_pcm_ioplug_t*) { return 0; },
-    .pointer = dxo_pointer,
-    .transfer = dxo_transfer,
-    .close = dxo_close,
-    .hw_params = dxo_hw_params,
-    .prepare = dxo_prepare,
+    .pointer = &AlsaPluginDxO::dxo_pointer,
+    .transfer = &AlsaPluginDxO::dxo_transfer,
+    .close = &AlsaPluginDxO::dxo_close,
+    .hw_params = &AlsaPluginDxO::dxo_hw_params,
+    .prepare = &AlsaPluginDxO::dxo_prepare,
 #if SND_PCM_EXTPLUG_VERSION >= 0x10002
-    .query_chmaps = dxo_query_chmaps,
-    .get_chmap = dxo_get_chmap,
+    .query_chmaps = &AlsaPluginDxO::dxo_query_chmaps,
+    .get_chmap = &AlsaPluginDxO::dxo_get_chmap,
 #endif
 };
 
@@ -250,14 +363,6 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   std::string coeffPath;
   std::string slavePcm;
   snd_config_t* slaveConfig = nullptr;
-
-  snd_output_t* output;
-// snd_output_stdio_attach(&(output), stdout, 0);
-#ifdef BUILD_ARM
-  snd_output_stdio_open(&(output), "/storage/dxo.txt", "w");
-#else
-  snd_output_stdio_open(&(output), "/home/malte/dxo.txt", "w");
-#endif
 
   snd_config_iterator_t i, next;
   snd_config_for_each(i, next, conf)
@@ -314,19 +419,14 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize);
-  plugin->callback = &callbacks;
-  plugin->version = SND_PCM_IOPLUG_VERSION;
-  plugin->name = "dxo";
-  plugin->private_data = plugin;
-  plugin->output_ = output;
-  plugin->pcmName_ = slavePcm;
+  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize, slavePcm, &callbacks);
+  plugin->enableLogging();
 
   auto result = snd_pcm_ioplug_create(plugin, name, stream, mode);
 
   if(result < 0)
   {
-    plugin->print("snd_pcm_ioplug_create failed\n");
+    plugin->print("snd_pcm_ioplug_create failed");
     return result;
   }
 
@@ -337,51 +437,51 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
   if(snd_pcm_ioplug_set_param_list(
          plugin, SND_PCM_IOPLUG_HW_ACCESS, std::size(supportedAccess), supportedAccess) < 0)
   {
-    plugin->print("SND_PCM_IOPLUG_HW_ACCESS failed\n");
+    plugin->print("SND_PCM_IOPLUG_HW_ACCESS failed");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_list(
          plugin, SND_PCM_IOPLUG_HW_FORMAT, std::size(supportedFormats), supportedFormats) < 0)
   {
-    plugin->print("SND_PCM_IOPLUG_HW_FORMAT failed\n");
+    plugin->print("SND_PCM_IOPLUG_HW_FORMAT failed");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_CHANNELS, 2, 3) < 0)
   {
-    plugin->print("SND_PCM_IOPLUG_HW_CHANNELS failed\n");
+    plugin->print("SND_PCM_IOPLUG_HW_CHANNELS failed");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 16 * 1024, 2 * 1024 * 1024) < 0)
   {
-    plugin->print("SND_PCM_IOPLUG_HW_PERIOD_BYTES failed\n");
+    plugin->print("SND_PCM_IOPLUG_HW_PERIOD_BYTES failed");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_BUFFER_BYTES, 16, 2 * 1024 * 1024) < 0)
   {
-    plugin->print("SND_PCM_IOPLUG_HW_BUFFER_BYTES failed\n");
+    plugin->print("SND_PCM_IOPLUG_HW_BUFFER_BYTES failed");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_list(
          plugin, SND_PCM_IOPLUG_HW_RATE, std::size(supportedHwRates), supportedHwRates) < 0)
   {
-    plugin->print("SND_PCM_IOPLUG_HW_RATE failed\n");
+    plugin->print("SND_PCM_IOPLUG_HW_RATE failed");
     return -EINVAL;
   }
 
   if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIODS, 1, 1024) < 0)
   {
-    plugin->print("SND_PCM_IOPLUG_HW_PERIODS failed\n");
+    plugin->print("SND_PCM_IOPLUG_HW_PERIODS failed");
     return -EINVAL;
   }
 
   *pcmp = plugin->pcm;
 
-  plugin->print("SND_PCM_PLUGIN_DEFINE_FUNC: Ok\r\n");
+  plugin->print("SND_PCM_PLUGIN_DEFINE_FUNC: Ok");
 
   return 0;
 }

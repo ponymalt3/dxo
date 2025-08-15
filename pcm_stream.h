@@ -5,7 +5,10 @@
 #include <stdint.h>
 
 #include <cmath>
+#include <initializer_list>
+#include <memory>
 #include <type_traits>
+#include <vector>
 
 template <typename DstType, typename SrcType>
 inline DstType convert(SrcType sample)
@@ -119,3 +122,41 @@ protected:
   uint32_t size_;
   uint32_t maxSize_;
 };
+
+namespace test_helper
+{
+
+template <typename SampleType>
+class Channel : public snd_pcm_channel_area_t
+{
+public:
+  Channel(SampleType* addr, uint32_t size, uint32_t step)
+  {
+    this->addr = addr;
+    this->step = step * sizeof(SampleType) * 8;
+    this->first = 0;
+  }
+
+  void setData(uint32_t offset, std::initializer_list<SampleType> data)
+  {
+    for(auto d : data)
+    {
+      reinterpret_cast<SampleType*>(addr)[offset * step / (sizeof(SampleType) * 8)] = d;
+      ++offset;
+    }
+  }
+
+  std::vector<SampleType> getData(uint32_t offset, uint32_t size)
+  {
+    std::vector<SampleType> data;
+    while(data.size() < size)
+    {
+      data.push_back(reinterpret_cast<SampleType*>(addr)[offset * step / (sizeof(SampleType) * 8)]);
+      ++offset;
+    }
+
+    return data;
+  }
+};
+
+}  // namespace test_helper

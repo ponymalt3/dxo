@@ -64,17 +64,17 @@ if(NOT BUILD_ARM)
   FetchContent_MakeAvailable(googletest)
 
   enable_testing()
-  add_executable(TestingX tests.cpp tasks/test.cpp crossover/test.cpp)
-  add_dependencies(TestingX DxO)
-  target_link_directories(TestingX PUBLIC fftw3f/lib)
-  target_link_libraries(TestingX gtest_main asound libfftw3f.a)
+  add_executable(RunTests alsa_plugin.cpp pcm_stream_tests.cpp alsa_plugin_tests.cpp neon_tests/neon_tests.cpp tasks/test.cpp crossover/test.cpp)
+  add_dependencies(RunTests DxO)
+  target_link_directories(RunTests PUBLIC fftw3f/lib)
+  target_link_libraries(RunTests gtest_main asound libfftw3f.a)
 
-  add_test(NAME example_test COMMAND Testing)
+  add_test(NAME gtests COMMAND Testing)
 
   if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_custom_command(
-      TARGET TestingX POST_BUILD
-      COMMAND TestingX --gtest_output=xml:Testing.xml
+      TARGET RunTests POST_BUILD
+      COMMAND RunTests --gtest_output=xml:Testing.xml
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
   endif()
