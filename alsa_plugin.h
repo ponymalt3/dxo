@@ -2,6 +2,7 @@
 
 #include <stdarg.h>
 
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <fstream>
@@ -20,8 +21,21 @@ class AlsaPluginDxO : public snd_pcm_ioplug_t
 public:
   enum
   {
-    kNumOutputChannels = 8
+    kNumOutputChannels = 8,
+    kScaleS16LE = 32767,
+    kChFL = 0,
+    kChFR = 3,
+    kChRL = 1,
+    kChRR = 4,
+    kChSL = 2,
+    kChSR = 5,
+    kChLFE = 6,
+    kChUnknown = 0
   };
+  static constexpr std::array<uint32_t, 20> kMapAlsaChannel{
+      kChUnknown, kChUnknown, kChUnknown, kChFL,      kChFR,      kChRL,      kChRR,
+      kChUnknown, kChLFE,     kChSL,      kChSL,      kChUnknown, kChUnknown, kChUnknown,
+      kChUnknown, kChUnknown, kChUnknown, kChUnknown, kChUnknown, kChUnknown};
 
   AlsaPluginDxO(const std::string& path, uint32_t blockSize)
       : blockSize_(blockSize),
@@ -32,7 +46,7 @@ public:
   {
     memset(this, 0, sizeof(snd_pcm_ioplug_t));
 
-    auto coeffs = loadFIRCoeffs(path, 32768.0f);
+    auto coeffs = loadFIRCoeffs(path, kScaleS16LE);
     assert(coeffs.size() == 7 && "Coeffs file need to provide 7 FIR transfer functions");
 
     std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
@@ -56,7 +70,7 @@ public:
     }
   }
 
-  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path, float scale = (1 << 15))
+  static std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path, float scale)
   {
     std::ifstream file(path);
 
@@ -172,15 +186,7 @@ public:
           print("%.6f\n", inputs_[0][i]);
         }*/
         auto start = std::chrono::high_resolution_clock::now();
-        memcpy(outputs_[0], inputs_[0], sizeof(float) * blockSize_);
-        memcpy(outputs_[1], inputs_[1], sizeof(float) * blockSize_);
-        memcpy(outputs_[2], inputs_[0], sizeof(float) * blockSize_);
-        memcpy(outputs_[3], inputs_[1], sizeof(float) * blockSize_);
-        memcpy(outputs_[4], inputs_[0], sizeof(float) * blockSize_);
-        memcpy(outputs_[5], inputs_[1], sizeof(float) * blockSize_);
-        memcpy(outputs_[6], inputs_[0], sizeof(float) * blockSize_);
-        memcpy(outputs_[7], inputs_[1], sizeof(float) * blockSize_);
-        // crossover_->updateInputs();
+        crossover_->updateInputs();
         auto end = std::chrono::high_resolution_clock::now();
 
         double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() * 1e-9;
@@ -189,17 +195,16 @@ public:
 
         PcmStream<int16_t> dst(outputBuffer_.get(), kNumOutputChannels);
         dst.loadInterleaved(blockSize_,
-                            outputs_[0],
-                            outputs_[1],
-                            outputs_[2],
-                            outputs_[3],
-                            outputs_[0],  // unused
-                            outputs_[6],
-                            outputs_[4],
-                            outputs_[5]);
+                            outputs_[channelMap_[0]],
+                            outputs_[channelMap_[1]],
+                            outputs_[channelMap_[2]],
+                            outputs_[channelMap_[3]],
+                            outputs_[channelMap_[4]],  // unused
+                            outputs_[channelMap_[5]],
+                            outputs_[channelMap_[6]],
+                            outputs_[channelMap_[7]]);
 
         alsa_writer(outputBuffer_.get(), blockSize_);
-
         inputOffset_ = 0;
       }
     }
@@ -220,4 +225,6 @@ public:
   std::unique_ptr<int16_t> outputBuffer_;
   double totalTime_{0};
   uint32_t totalBlocks_{0};
+  // Map ALSA channels to channel index from FirMultiChannelCrossover
+  std::array<uint32_t, 8> channelMap_{kChFL, kChFR, kChRL, kChRR, kChUnknown, kChLFE, kChSL, kChSR};
 };

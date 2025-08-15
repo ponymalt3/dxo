@@ -10,14 +10,21 @@
 template <typename DstType, typename SrcType>
 inline DstType convert(SrcType sample)
 {
-  DstType new_sample{sample};
-  return new_sample;
+  return static_cast<DstType>(sample);
 }
 
 template <>
 inline float convert<float, int16_t>(int16_t sample)
 {
   return std::ldexp(static_cast<float>(sample), -15);
+}
+
+template <typename DstType, typename SrcType>
+inline void copy(DstType*& dst, SrcType*& src)
+{
+  *dst = convert<std::remove_reference_t<DstType>>(*src);
+  ++src;
+  ++dst;
 }
 
 template <typename SampleType>
@@ -45,12 +52,15 @@ public:
   template <typename... Args>
   void extractInterleaved(uint32_t size, Args... args)
   {
+    constexpr auto kNumArgs = sizeof...(Args);
+
     auto* src = addr_;
     auto* srcMax = src + calculateOffset(size);
 
     while(src < srcMax)
     {
       ((*args++ = convert<std::remove_reference_t<decltype(*args)>>(*src++)), ...);
+      src += step_ - kNumArgs;
     }
 
     addr_ = srcMax;
@@ -59,15 +69,18 @@ public:
   template <typename... Args>
   void loadInterleaved(uint32_t size, Args... args)
   {
-    auto* src = addr_;
-    auto* srcMax = src + calculateOffset(size);
+    constexpr auto kNumArgs = sizeof...(Args);
 
-    while(src < srcMax)
+    auto* dst = addr_;
+    auto* dstMax = dst + calculateOffset(size);
+
+    while(dst < dstMax)
     {
-      ((*src++ = convert<std::remove_reference_t<decltype(*src)>>(*args++)), ...);
+      ((*dst++ = convert<std::remove_reference_t<decltype(*dst)>>(*args++)), ...);
+      dst += step_ - kNumArgs;
     }
 
-    addr_ = srcMax;
+    addr_ = dst;
   }
 
 protected:
@@ -99,7 +112,6 @@ public:
   }
 
   uint32_t getNumChannels() const { return this->step_ / sizeof(SampleType); }
-
   uint32_t available() const { return size_ - ((this->addr_ - buffer_.get()) / this->step_); }
 
 protected:

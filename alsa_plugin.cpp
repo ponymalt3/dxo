@@ -28,7 +28,6 @@ snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* ext,
     return -EBUSY;
   }
 
-  plugin->print("out: %d\r\n", size);
 
   const auto writer = [plugin](const int16_t* data, uint32_t frames) {
     return plugin->alsa_writer(data, frames);
@@ -111,9 +110,11 @@ int dxo_try_open_device(AlsaPluginDxO* plugin)
 
   if(chMap)
   {
-    for(uint32_t i = 0; i < chMap[0].channels; ++i)
+    //{kChFL, kChFR, kChRL, kChRR, kChUnknown, kChLFE, kChSL, kChSR}
+    for(auto i{0}; i < chMap[0].channels; ++i)
     {
       plugin->print("CHMAP[%d]: %d\n", i, chMap[0].pos[i]);
+      // plugin->channelMap_[AlsaPluginDxO::kMapAlsaChannel[chMap[0].pos[i]]] = i;
     }
     plugin->print("\n");
   }

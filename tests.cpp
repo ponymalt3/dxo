@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <initializer_list>
 #include <thread>
 #include <vector>
@@ -84,14 +85,17 @@ TEST_F(PcmStreamTest, Test_InterleavedExtract)
   PcmStream<int32_t> stream(interleaved.data(), 0);
   stream.extractInterleaved(4U, ch1, ch2, ch3, ch4, ch5, ch6, ch7, ch8);
 
-  EXPECT_EQ(ch1[0], 0);
-  EXPECT_EQ(ch2[0], 4);
-  EXPECT_EQ(ch3[0], 8);
-  EXPECT_EQ(ch4[0], 12);
-  EXPECT_EQ(ch5[0], 16);
-  EXPECT_EQ(ch6[0], 20);
-  EXPECT_EQ(ch7[0], 24);
-  EXPECT_EQ(ch8[0], 28);
+  for(auto i{0}; i < 4; ++i)
+  {
+    EXPECT_EQ(ch1[i], 0 + i);
+    EXPECT_EQ(ch2[i], 4 + i);
+    EXPECT_EQ(ch3[i], 8 + i);
+    EXPECT_EQ(ch4[i], 12 + i);
+    EXPECT_EQ(ch5[i], 16 + i);
+    EXPECT_EQ(ch6[i], 20 + i);
+    EXPECT_EQ(ch7[i], 24 + i);
+    EXPECT_EQ(ch8[i], 28 + i);
+  }
 }
 
 TEST_F(PcmStreamTest, Test_InterleavedExtractScaling)
@@ -186,6 +190,11 @@ TEST_F(PcmStreamTest, Test_PcmBuffer)
 class AlsaPluginTest : public testing::Test
 {
 public:
+  static void SetUpTestSuite()
+  {
+    std::filesystem::current_path("/home/malte/Documents/DxO/rpi_digital_crossover");
+  }
+
   void sleepFor(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 
   template <typename T>
@@ -201,13 +210,13 @@ public:
     return result;
   }
 
-  AlsaPluginDxO plugin{"coeffs_reduced", 256};
+  AlsaPluginDxO plugin{"coeffs_reduced.m", 256};
   std::vector<std::unique_ptr<unsigned char[]>> mem_;
 };
 
 TEST_F(AlsaPluginTest, Test_LoadCoefficents)
 {
-  auto coeffs = AlsaPluginDxO::loadFIRCoeffs("coeffs.m");
+  auto coeffs = AlsaPluginDxO::loadFIRCoeffs("coeffs.m", 1.0f);
   ASSERT_EQ(coeffs.size(), 7);
 
   for(auto& filter : coeffs)
@@ -218,26 +227,32 @@ TEST_F(AlsaPluginTest, Test_LoadCoefficents)
 
 TEST_F(AlsaPluginTest, Test_PluginUpdate)
 {
+  static constexpr auto kFrames = 256;
   auto interleaved = GetInterleavedData<float>(2);
-  for(auto i{0}; i < 256; ++i)
+  for(auto i{0}; i < kFrames; ++i)
   {
-    interleaved[0].setData(i, {static_cast<float>(i)});
-    interleaved[1].setData(i, {static_cast<float>(i) + 256});
+    interleaved[0].setData(i, {1.0f / static_cast<float>(i + 1)});
+    interleaved[1].setData(i, {-1.0f / static_cast<float>(i + 1)});
   }
   PcmStream<float> stream(interleaved.data(), 0);
 
   const auto test_writer = [&interleaved](const int16_t* data, uint32_t frames) {
-    ASSERT_EQ(frames, 256);
+    ASSERT_EQ(frames, kFrames);
     auto ch0 = interleaved.data()[0].getData(0, frames);
     auto ch1 = interleaved.data()[1].getData(0, frames);
 
-    for(auto i{0}; i < frames; ++i)
+    for(auto i{0}; i < kFrames; ++i)
     {
       auto index = i * AlsaPluginDxO::kNumOutputChannels;
-      EXPECT_EQ(data[index + 0], static_cast<int16_t>(ch0[i] * 32768));
-      EXPECT_EQ(data[index + 1], static_cast<int16_t>(ch1[i] * 32768));
+      EXPECT_NEAR(data[index + 0], ch0[i] * 32768.0f, 1.1f);
+      EXPECT_NEAR(data[index + 1], ch1[i] * 32768.0f, 1.1f);
+      EXPECT_NEAR(data[index + 2], ch0[i] * 32768.0f, 1.1f);
+      EXPECT_NEAR(data[index + 3], ch1[i] * 32768.0f, 1.1f);
+      EXPECT_NEAR(data[index + 6], ch0[i] * 32768.0f, 1.1f);
+      EXPECT_NEAR(data[index + 7], ch1[i] * 32768.0f, 1.1f);
+      EXPECT_NEAR(data[index + 5], 0.0f, 1.1f);
     }
   };
 
-  plugin.update(stream, 256, false, test_writer);
+  plugin.update(stream, kFrames, false, test_writer);
 }
