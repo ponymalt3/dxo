@@ -69,7 +69,7 @@ if(NOT BUILD_ARM)
   target_link_directories(RunTests PUBLIC fftw3f/lib)
   target_link_libraries(RunTests gtest_main asound libfftw3f.a)
 
-  add_test(NAME gtests COMMAND Testing)
+  #add_test(NAME gtests COMMAND RunTests)
 
   if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_custom_command(

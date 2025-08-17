@@ -342,6 +342,23 @@ int AlsaPluginDxO::dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* para
   return dxo_try_open_device(plugin);
 }
 
+int AlsaPluginDxO::dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp)
+{
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  plugin->print("dxo_delay");
+
+  snd_pcm_sframes_t slave_delay{0};
+  const auto result = snd_pcm_delay(plugin->pcm_output_device_, &slave_delay);
+  if(result < 0)
+  {
+    plugin->print("snd_pcm_delay failed!");
+    return result;
+  }
+
+  *delayp = slave_delay + plugin->inputOffset_;
+  return 0;
+}
+
 static const snd_pcm_ioplug_callback_t callbacks = {
     .start = [](snd_pcm_ioplug_t*) { return 0; },
     .stop = [](snd_pcm_ioplug_t*) { return 0; },
@@ -351,6 +368,7 @@ static const snd_pcm_ioplug_callback_t callbacks = {
     .hw_params = &AlsaPluginDxO::dxo_hw_params,
     .prepare = &AlsaPluginDxO::dxo_prepare,
 #if SND_PCM_EXTPLUG_VERSION >= 0x10002
+    .delay = &AlsaPluginDxO::dxo_delay,
     .query_chmaps = &AlsaPluginDxO::dxo_query_chmaps,
     .get_chmap = &AlsaPluginDxO::dxo_get_chmap,
 #endif

@@ -109,6 +109,7 @@ public:
     return 0;
   }
 
+  // ALSA ioplug functions
   static snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io);
   static snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* io,
                                         const snd_pcm_channel_area_t* src_areas,
@@ -120,6 +121,7 @@ public:
   static snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io);
   static snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io);
   static int dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params);
+  static int dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp);
 
 protected:
   uint32_t blockSize_{};
