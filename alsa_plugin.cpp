@@ -180,40 +180,39 @@ int AlsaPluginDxO::dxo_try_open_device(AlsaPluginDxO* plugin)
     return -EBUSY;
   }
 
-  snd_pcm_hw_params_alloca(&(plugin->params_));
-  snd_pcm_hw_params_any(plugin->pcm_output_device_, plugin->params_);
-  // snd_pcm_hw_params_dump(plugin->params_, plugin->output_);
+  snd_pcm_hw_params_t* params{nullptr};
+  snd_pcm_hw_params_alloca(&params);
+  snd_pcm_hw_params_any(plugin->pcm_output_device_, params);
+  // snd_pcm_hw_params_dump(params, plugin->output_);
 
-  if(snd_pcm_hw_params_set_access(
-         plugin->pcm_output_device_, plugin->params_, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
+  if(snd_pcm_hw_params_set_access(plugin->pcm_output_device_, params, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
   {
     plugin->print("snd_pcm_hw_params_set_access failed");
   }
 
-  if(snd_pcm_hw_params_set_format(plugin->pcm_output_device_, plugin->params_, SND_PCM_FORMAT_S16_LE) < 0)
+  if(snd_pcm_hw_params_set_format(plugin->pcm_output_device_, params, SND_PCM_FORMAT_S16_LE) < 0)
   {
     plugin->print("snd_pcm_hw_params_set_format failed");
   }
 
-  if(snd_pcm_hw_params_set_channels(
-         plugin->pcm_output_device_, plugin->params_, AlsaPluginDxO::kNumOutputChannels) < 0)
+  if(snd_pcm_hw_params_set_channels(plugin->pcm_output_device_, params, AlsaPluginDxO::kNumOutputChannels) <
+     0)
   {
     plugin->print("snd_pcm_hw_params_set_channels failed");
   }
 
   uint32_t rate = plugin->rate;
-  if(snd_pcm_hw_params_set_rate_near(plugin->pcm_output_device_, plugin->params_, &rate, 0) < 0)
+  if(snd_pcm_hw_params_set_rate_near(plugin->pcm_output_device_, params, &rate, 0) < 0)
   {
     plugin->print("snd_pcm_hw_params_set_rate_near failed");
   }
 
-  if(snd_pcm_hw_params_set_period_size(plugin->pcm_output_device_, plugin->params_, plugin->blockSize_, 0) <
-     0)
+  if(snd_pcm_hw_params_set_period_size(plugin->pcm_output_device_, params, plugin->blockSize_, 0) < 0)
   {
     plugin->print("snd_pcm_hw_params_set_period_size failed");
   }
 
-  if(snd_pcm_hw_params(plugin->pcm_output_device_, plugin->params_) < 0)
+  if(snd_pcm_hw_params(plugin->pcm_output_device_, params) < 0)
   {
     plugin->print("snd_pcm_hw_params failed");
     snd_pcm_close(plugin->pcm_output_device_);
@@ -258,6 +257,9 @@ int AlsaPluginDxO::dxo_close(snd_pcm_ioplug_t* io)
     snd_output_close(plugin->output_);
     plugin->pcm_output_device_ = nullptr;
   }
+
+  plugin->print("OKKK");
+  plugin->logging_.flush();
 
   delete plugin;
 

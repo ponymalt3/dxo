@@ -111,8 +111,8 @@ public:
 
   ~TaskRunner()
   {
-    stop_.store(true);  // Signal threads to stop
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    stop_.store(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
     cv_.notify_all();
 
     for(auto& worker : workers_)
