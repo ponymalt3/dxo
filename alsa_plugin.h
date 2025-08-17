@@ -51,11 +51,13 @@ public:
   void print(Args... args)
   {
     (logging_ << ... << args) << "\n";
+    logging_.flush();
   }
 
   template <typename _InputSampleType, typename _LambdaType>
   uint32_t update(PcmStream<_InputSampleType>& src, uint32_t size, bool hasLFE, _LambdaType writer)
   {
+    print("update start");
     auto i{0U};
     while(i < size)
     {
@@ -105,6 +107,8 @@ public:
         inputOffset_ = 0;
       }
     }
+
+    print("update ok");
 
     return 0;
   }
