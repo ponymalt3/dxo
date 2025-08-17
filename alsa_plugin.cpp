@@ -228,7 +228,7 @@ int AlsaPluginDxO::dxo_try_open_device(AlsaPluginDxO* plugin)
     for(auto i{0}; i < chMap[0].channels; ++i)
     {
       plugin->print("CHMAP[", i, "]: ", chMap[0].pos[i]);
-      plugin->channelMap_[i] = kMapAlsaChannel[chMap[0].pos[i]];
+      // plugin->channelMap_[i] = kMapAlsaChannel[chMap[0].pos[i]];
     }
   }
 
