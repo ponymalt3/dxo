@@ -228,7 +228,7 @@ int AlsaPluginDxO::dxo_try_open_device(AlsaPluginDxO* plugin)
     for(auto i{0}; i < chMap[0].channels; ++i)
     {
       plugin->print("CHMAP[", i, "]: ", chMap[0].pos[i]);
-      plugin->channelMap_[i] = kMapAlsaChannel[chMap[0].pos[i]];
+      // plugin->channelMap_[i] = kMapAlsaChannel[chMap[0].pos[i]];
     }
   }
 
@@ -368,7 +368,7 @@ static const snd_pcm_ioplug_callback_t callbacks = {
     .hw_params = &AlsaPluginDxO::dxo_hw_params,
     .prepare = &AlsaPluginDxO::dxo_prepare,
 #if SND_PCM_EXTPLUG_VERSION >= 0x10002
-    .delay = &AlsaPluginDxO::dxo_delay,
+    // .delay = &AlsaPluginDxO::dxo_delay,
     .query_chmaps = &AlsaPluginDxO::dxo_query_chmaps,
     .get_chmap = &AlsaPluginDxO::dxo_get_chmap,
 #endif
