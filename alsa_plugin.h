@@ -128,11 +128,9 @@ protected:
   std::vector<float*> inputs_{nullptr};
   std::vector<float*> outputs_{nullptr};
   uint32_t inputOffset_{0};
-  snd_output_t* output_{nullptr};
   std::ofstream logging_{};
   std::unique_ptr<FirMultiChannelCrossover> crossover_;
   snd_pcm_t* pcm_output_device_{nullptr};
-  snd_pcm_hw_params_t* params_{nullptr};
   std::string pcmName_{};
   std::atomic<uint32_t> streamPos_{0};
   std::unique_ptr<int16_t> outputBuffer_;
