@@ -112,6 +112,7 @@ public:
   ~TaskRunner()
   {
     stop_.store(true);  // Signal threads to stop
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     cv_.notify_all();
 
     for(auto& worker : workers_)
@@ -123,7 +124,7 @@ public:
     }
   }
 
-  bool run(const std::vector<std::shared_ptr<Task>>& tasks, bool wait = true)
+  void run(const std::vector<std::shared_ptr<Task>>& tasks, bool wait = true)
   {
     std::shared_ptr<Task> finalTask{nullptr};
 
@@ -144,51 +145,31 @@ public:
 
     if(finalTask_ && wait)
     {
-      threadRun(true);
+      // threadRun(true);
       finalTaskReady_.acquire();
       finalTask_->execute(nullptr);
       finalTask_ = nullptr;
     }
-
-    return true;
   }
 
 protected:
-  void restartWorker(bool all = true)
+  void restartWorker()
   {
-    if(all)
-    {
-      cv_.notify_all();
-    }
-    else
-    {
-      cv_.notify_one();
-    }
-  }
-
-  void wait()
-  {
-    std::unique_lock lock(mutex_);
-    cv_.wait(lock);
+    ++epoch_;
+    cv_.notify_all();
   }
 
   void threadRun(bool master)
   {
-    uint64_t state{1};
-
-    wait();
     while(!stop_.load())
     {
+      const auto epoch = epoch_.load();
       auto task = activeTasks_.pop();
 
       if(task == nullptr)
       {
-        if(master)
-        {
-          return;
-        }
-
-        wait();
+        std::unique_lock lock(mutex_);
+        cv_.wait(lock, [this, epoch]() { return epoch != epoch_ || stop_; });
       }
       else
       {
@@ -209,7 +190,6 @@ protected:
 
         if(listWasEmpty)
         {
-          // restart worker
           restartWorker();
         }
       }
@@ -223,4 +203,5 @@ protected:
   std::atomic<bool> stop_{false};
   std::binary_semaphore finalTaskReady_{0};
   std::shared_ptr<Task> finalTask_{nullptr};
+  std::atomic<uint64_t> epoch_{0};
 };
