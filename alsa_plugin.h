@@ -40,6 +40,7 @@ public:
 
   AlsaPluginDxO(const std::string& path,
                 uint32_t blockSize,
+                uint32_t firDelay,
                 const std::string slavePcm,
                 const snd_pcm_ioplug_callback_t* callbacks);
 
@@ -78,7 +79,7 @@ public:
 
       inputOffset_ += segmentSize;
       i += segmentSize;
-      streamPos_ += segmentSize;
+      // streamPos_ += segmentSize;
 
       if(inputOffset_ == blockSize_)
       {
@@ -102,6 +103,7 @@ public:
                             outputs_[channelMap_[7]]);
 
         writer(outputBuffer_.get(), blockSize_);
+        streamPos_ += blockSize_;
         inputOffset_ = 0;
       }
     }
@@ -122,9 +124,11 @@ public:
   static snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io);
   static int dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params);
   static int dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp);
+  static int dxo_stop(snd_pcm_ioplug_t* io);
 
 protected:
   uint32_t blockSize_{};
+  uint32_t firDelay_{};
   std::vector<float*> inputs_{nullptr};
   std::vector<float*> outputs_{nullptr};
   uint32_t inputOffset_{0};
