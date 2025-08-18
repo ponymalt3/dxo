@@ -129,7 +129,22 @@ extern "C" {
 snd_pcm_sframes_t AlsaPluginDxO::dxo_pointer(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  return plugin->streamPos_ % (plugin->buffer_size / 2);
+  // return plugin->streamPos_ % plugin->buffer_size;  //(plugin->buffer_size / 2);
+
+  // Verfügbar-Update beim Slave erzwingen
+  if(snd_pcm_avail_update(plugin->pcm_output_device_) < 0)
+  {
+    return 0;
+  }
+
+  // Hardware-Pointer des Slave-Geräts ermitteln
+  snd_pcm_sframes_t delay;
+  snd_pcm_delay(plugin->pcm_output_device_, &delay);
+
+  // Unser hw_ptr aus appl_ptr und delay rekonstruieren
+  const auto hw_ptr = (io->appl_ptr + io->buffer_size - delay) % io->buffer_size;
+
+  return hw_ptr;
 }
 
 snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
@@ -357,7 +372,10 @@ int AlsaPluginDxO::dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp)
     return result;
   }
 
-  *delayp = slave_delay + plugin->inputOffset_;
+  const auto firDelay = 2047;
+  const auto algorithmDelay = plugin->blockSize_ - plugin->inputOffset_;
+
+  *delayp = slave_delay + firDelay + algorithmDelay;
   return 0;
 }
 
