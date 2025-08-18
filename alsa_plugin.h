@@ -78,7 +78,7 @@ public:
 
       inputOffset_ += segmentSize;
       i += segmentSize;
-      streamPos_ += segmentSize;
+      // streamPos_ += segmentSize;
 
       if(inputOffset_ == blockSize_)
       {
@@ -102,6 +102,7 @@ public:
                             outputs_[channelMap_[7]]);
 
         writer(outputBuffer_.get(), blockSize_);
+        streamPos_ += blockSize_;
         inputOffset_ = 0;
       }
     }
@@ -121,7 +122,6 @@ public:
   static snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io);
   static snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io);
   static int dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params);
-  static int dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp);
 
 protected:
   uint32_t blockSize_{};
