@@ -130,6 +130,21 @@ snd_pcm_sframes_t AlsaPluginDxO::dxo_pointer(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
   return plugin->streamPos_ % (plugin->buffer_size / 2);
+  /*
+    // Verfügbar-Update beim Slave erzwingen
+    if(snd_pcm_avail_update(plugin->pcm_output_device_) < 0)
+    {
+      return 0;
+    }
+
+    // Hardware-Pointer des Slave-Geräts ermitteln
+    snd_pcm_sframes_t delay;
+    snd_pcm_delay(plugin->pcm_output_device_, &delay);
+
+    // Unser hw_ptr aus appl_ptr und delay rekonstruieren
+    const auto hw_ptr = (io->appl_ptr + io->buffer_size - delay) % io->buffer_size;
+
+    return hw_ptr;*/
 }
 
 snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
@@ -138,12 +153,6 @@ snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
                                               snd_pcm_uframes_t size)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-
-  if(!plugin->pcm_output_device_)
-  {
-    plugin->print("Device not opened!");
-    return -EBUSY;
-  }
 
   const auto writer = [plugin](const int16_t* data, uint32_t frames) {
     return plugin->writePcm(data, frames);
@@ -242,6 +251,7 @@ int AlsaPluginDxO::dxo_prepare(snd_pcm_ioplug_t* io)
   plugin->print("dxo_prepare");
   plugin->streamPos_ = 0;
   plugin->inputOffset_ = 0;
+  plugin->crossover_->resetDelayLine();
   return 0;
 }
 
@@ -350,27 +360,48 @@ int AlsaPluginDxO::dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp)
   plugin->print("dxo_delay");
 
   snd_pcm_sframes_t slave_delay{0};
-  const auto result = snd_pcm_delay(plugin->pcm_output_device_, &slave_delay);
+  /*const auto result = snd_pcm_delay(plugin->pcm_output_device_, &slave_delay);
   if(result < 0)
   {
     plugin->print("snd_pcm_delay failed!");
-    return result;
-  }
+    return 0;
+  }*/
 
-  *delayp = slave_delay + plugin->inputOffset_;
+  const auto firDelay = 1;
+  const auto algorithmDelay = plugin->blockSize_ - plugin->inputOffset_;
+  *delayp = firDelay + algorithmDelay;
+
+  return 0;
+}
+
+int AlsaPluginDxO::dxo_start(snd_pcm_ioplug_t* io)
+{
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  plugin->print("dxo_start");
+
+  plugin->streamPos_ = 0;
+  plugin->inputOffset_ = 0;
+
+  return 0;
+}
+
+int AlsaPluginDxO::dxo_stop(snd_pcm_ioplug_t* io)
+{
+  auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
+  plugin->print("dxo_stop");
   return 0;
 }
 
 static const snd_pcm_ioplug_callback_t callbacks = {
-    .start = [](snd_pcm_ioplug_t*) { return 0; },
-    .stop = [](snd_pcm_ioplug_t*) { return 0; },
+    .start = &AlsaPluginDxO::dxo_start,
+    .stop = &AlsaPluginDxO::dxo_stop,
     .pointer = &AlsaPluginDxO::dxo_pointer,
     .transfer = &AlsaPluginDxO::dxo_transfer,
     .close = &AlsaPluginDxO::dxo_close,
     .hw_params = &AlsaPluginDxO::dxo_hw_params,
     .prepare = &AlsaPluginDxO::dxo_prepare,
 #if SND_PCM_EXTPLUG_VERSION >= 0x10002
-    .delay = &AlsaPluginDxO::dxo_delay,
+    //.delay = &AlsaPluginDxO::dxo_delay,
     .query_chmaps = &AlsaPluginDxO::dxo_query_chmaps,
     .get_chmap = &AlsaPluginDxO::dxo_get_chmap,
 #endif
