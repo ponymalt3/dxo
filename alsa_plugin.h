@@ -78,7 +78,7 @@ public:
 
       inputOffset_ += segmentSize;
       i += segmentSize;
-      streamPos_ += segmentSize;
+      // streamPos_ += segmentSize;
 
       if(inputOffset_ == blockSize_)
       {
@@ -102,6 +102,7 @@ public:
                             outputs_[channelMap_[7]]);
 
         writer(outputBuffer_.get(), blockSize_);
+        streamPos_ += blockSize_;
         inputOffset_ = 0;
       }
     }
