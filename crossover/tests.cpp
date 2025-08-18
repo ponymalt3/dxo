@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
-#include <iostream>
 #include <vector>
 
 #include "convolution.h"
@@ -33,9 +32,12 @@ public:
     return result;
   }
 
-  void expectEqual(const std::span<float>& a, const std::span<float>& b)
+  bool equals(const std::span<float>& a, const std::span<float>& b)
   {
-    EXPECT_GT(std::min(a.size(), b.size()), 1);
+    if(std::min(a.size(), b.size()) <= 1)
+    {
+      return false;
+    }
 
     constexpr auto epsilon = 0.04f;
 
@@ -52,9 +54,15 @@ public:
         epsilonScaled = 0.00001f;
       }
 
-      EXPECT_LE(dif, epsilonScaled) << " at " << (i) << "\n  e = " << (epsilonScaled) << "\n  a = " << (a[i])
-                                    << "\n  b = " << (b[i]);
+      if(dif >= epsilonScaled)
+      {
+        // std::cout << " at " << (i) << "\n  e = " << (epsilonScaled) << "\n  a = " << (a[i])
+        //           << "\n  b = " << (b[i]) << std::endl;
+        return false;
+      }
     }
+
+    return true;
   }
 
 protected:
@@ -94,7 +102,7 @@ TEST_F(FirFilterTest, Test_ParallelConvolution)
       }
     }
 
-    expectEqual(result_upc, result_conv);
+    EXPECT_TRUE(equals(result_upc, result_conv));
   }
 }
 
@@ -165,7 +173,36 @@ TEST_F(FirFilterTest, Test_FirMultiChannelCrossover)
   for(auto i{0U}; i < h.size(); ++i)
   {
     auto conv = convolve(h[i], inputs[InputChannelMap[i]]);
-    expectEqual(std::span(conv).subspan(0, BlockSize * NumBlocks),
-                std::span(outputs[i]).subspan(0, BlockSize * NumBlocks));
+    EXPECT_TRUE(equals(std::span(conv).subspan(0, BlockSize * NumBlocks),
+                       std::span(outputs[i]).subspan(0, BlockSize * NumBlocks)));
   }
+}
+
+TEST_F(FirFilterTest, Test_ResetFilterState)
+{
+  constexpr auto BlockSize = 4U;
+  constexpr auto NumOutputs = 2U;
+  std::vector<float> kZeros(BlockSize, 0.0f);
+
+  std::vector<float> h{0, 1, 2, 3, 4, 5, 6, 7};
+  std::vector<FirMultiChannelCrossover::ConfigType> config{{0, h}, {1, h}};
+  std::vector<std::vector<float>> inputs{{1, 2, 3, 4}, {8, 7, 6, 5}};
+  std::vector<std::vector<float>> outputs(NumOutputs);
+
+  FirMultiChannelCrossover fmcc(BlockSize, inputs.size(), config, 1);
+
+  std::copy(inputs[0].begin(), inputs[0].end(), fmcc.getInputBuffer(0).begin());
+  std::copy(inputs[1].begin(), inputs[1].end(), fmcc.getInputBuffer(1).begin());
+
+  fmcc.updateInputs();
+
+  EXPECT_FALSE(equals(kZeros, fmcc.getOutputBuffer(0)));
+  EXPECT_FALSE(equals(kZeros, fmcc.getOutputBuffer(1)));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+  fmcc.resetFilterState();
+
+  EXPECT_TRUE(equals(kZeros, fmcc.getOutputBuffer(0)));
+  EXPECT_TRUE(equals(kZeros, fmcc.getOutputBuffer(1)));
 }
