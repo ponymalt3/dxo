@@ -70,6 +70,8 @@ public:
     return outputBuffer_[outputChannel];
   }
 
+  void resetDelayLine() {}
+
 protected:
   TaskRunner runner_;
   std::vector<TaskType> inputJobs_;
