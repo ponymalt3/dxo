@@ -129,22 +129,7 @@ extern "C" {
 snd_pcm_sframes_t AlsaPluginDxO::dxo_pointer(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  return plugin->streamPos_ % (plugin->buffer_size / 2);
-  /*
-    // Verfügbar-Update beim Slave erzwingen
-    if(snd_pcm_avail_update(plugin->pcm_output_device_) < 0)
-    {
-      return 0;
-    }
-
-    // Hardware-Pointer des Slave-Geräts ermitteln
-    snd_pcm_sframes_t delay;
-    snd_pcm_delay(plugin->pcm_output_device_, &delay);
-
-    // Unser hw_ptr aus appl_ptr und delay rekonstruieren
-    const auto hw_ptr = (io->appl_ptr + io->buffer_size - delay) % io->buffer_size;
-
-    return hw_ptr;*/
+  return plugin->streamPos_ % (plugin->buffer_size / 1);
 }
 
 snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
@@ -359,15 +344,18 @@ int AlsaPluginDxO::dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp)
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
   // plugin->print("dxo_delay");
 
-  snd_pcm_sframes_t slave_delay{0};
-  const auto result = snd_pcm_delay(plugin->pcm_output_device_, &slave_delay);
+  snd_pcm_sframes_t slaveDelay{0};
+  const auto result = snd_pcm_delay(plugin->pcm_output_device_, &slaveDelay);
   if(result < 0)
   {
     plugin->print("snd_pcm_delay failed!");
     return result;
   }
 
-  *delayp = slave_delay + 1 + plugin->blockSize_ - plugin->inputOffset_;
+  const auto firDelay = 1;
+  const auto convDelay = plugin->blockSize_ - plugin->inputOffset_;
+
+  *delayp = slaveDelay + firDelay + convDelay;
   return 0;
 }
 
