@@ -6,6 +6,7 @@
 #include <cmath>
 #include <complex>
 #include <cstring>
+#include <functional>
 #include <list>
 #include <span>
 #include <vector>
@@ -23,7 +24,7 @@ using TaskType = std::shared_ptr<Task>;
 
 static_assert(sizeof(std::complex<float>) == sizeof(fftwf_complex));
 
-static void multiply(std::complex<float>* result,
+inline void multiply(std::complex<float>* result,
                      const std::complex<float>* src1,
                      const std::complex<float>* src2,
                      uint32_t size)
@@ -67,7 +68,7 @@ static void multiply(std::complex<float>* result,
   }
 }
 
-static void multiplyAdd(std::complex<float>* result,
+inline void multiplyAdd(std::complex<float>* result,
                         const std::complex<float>* src1,
                         const std::complex<float>* src2,
                         uint32_t size)
@@ -111,7 +112,7 @@ static void multiplyAdd(std::complex<float>* result,
   }
 }
 
-static void add(std::complex<float>* result,
+inline void add(std::complex<float>* result,
                 const std::complex<float>* src1,
                 const std::complex<float>* src2,
                 uint32_t size)
@@ -168,12 +169,7 @@ public:
         std::complex<float>[blockSize_ * numBlocks_];  // make each block cache line aligned
     delayLine_ = new(std::align_val_t(64)) std::complex<float>[blockSize_ * numBlocks_];
 
-    // clear delay line
-    for(uint32_t i{0}; i < numBlocks_; ++i)
-    {
-      memset(getBlock(i), 0, blockSize_ * sizeof(std::complex<float>));
-    }
-
+    clearDelayLine();
     transformFilterCoeffs(h);
   }
 
@@ -198,7 +194,8 @@ public:
           forwardFft->run();
         },
         {},
-        forwardFft->output_.subspan(0));
+        forwardFft->output_.subspan(0),
+        [overlapBuffer, subFilterSize]() { memset(overlapBuffer.get(), 0, sizeof(float) * subFilterSize); });
 
     return {fft, forwardFft->input_.last(inputBlockSize)};
   }
@@ -279,6 +276,8 @@ public:
 
     return {{rootTask, resultTask}, resultTask->getArtifact<RealData>()};
   }
+
+  void clearDelayLine() { memset(delayLine_, 0, blockSize_ * numBlocks_ * sizeof(delayLine_[0])); }
 
 protected:
   static uint32_t getSubFilterSize(uint32_t inputBlockSize)

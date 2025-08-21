@@ -6,9 +6,11 @@
 
 AlsaPluginDxO::AlsaPluginDxO(const std::string& path,
                              uint32_t blockSize,
+                             uint32_t firDelay,
                              const std::string slavePcm,
                              const snd_pcm_ioplug_callback_t* callbacks)
     : blockSize_(blockSize),
+      firDelay_(firDelay),
       inputs_(3),
       outputs_(7),
       inputOffset_(0),
@@ -129,7 +131,7 @@ extern "C" {
 snd_pcm_sframes_t AlsaPluginDxO::dxo_pointer(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  return plugin->streamPos_ % (plugin->buffer_size / 1);
+  return plugin->streamPos_ % plugin->buffer_size;
 }
 
 snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
@@ -236,7 +238,7 @@ int AlsaPluginDxO::dxo_prepare(snd_pcm_ioplug_t* io)
   plugin->print("dxo_prepare");
   plugin->streamPos_ = 0;
   plugin->inputOffset_ = 0;
-  plugin->crossover_->resetDelayLine();
+  plugin->crossover_->resetFilterState();
   return 0;
 }
 
@@ -342,7 +344,6 @@ int AlsaPluginDxO::dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* para
 int AlsaPluginDxO::dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  // plugin->print("dxo_delay");
 
   snd_pcm_sframes_t slaveDelay{0};
   const auto result = snd_pcm_delay(plugin->pcm_output_device_, &slaveDelay);
@@ -352,10 +353,9 @@ int AlsaPluginDxO::dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp)
     return result;
   }
 
-  const auto firDelay = 1;
   const auto convDelay = plugin->blockSize_ - plugin->inputOffset_;
+  *delayp = slaveDelay + plugin->firDelay_ + convDelay;
 
-  *delayp = slaveDelay + firDelay + convDelay;
   return 0;
 }
 
@@ -376,8 +376,8 @@ static const snd_pcm_ioplug_callback_t callbacks = {
 
 SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
 {
-  long int channels = 0;
   long int blockSize = 128;
+  long int firDelay = 0;  // ignore fir delay by default
   std::string coeffPath;
   std::string slavePcm;
   snd_config_t* slaveConfig = nullptr;
@@ -411,15 +411,16 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
       continue;
     }
 
-    if(param == "channels")
-    {
-      snd_config_get_integer(config, &channels);
-      continue;
-    }
-
     if(param == "blocksize")
     {
       snd_config_get_integer(config, &blockSize);
+      continue;
+    }
+
+    if(param == "fir_delay")
+    {
+      snd_config_get_integer(config, &firDelay);
+      firDelay = std::max(0L, firDelay);
       continue;
     }
 
@@ -437,7 +438,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize, slavePcm, &callbacks);
+  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize, firDelay, slavePcm, &callbacks);
   plugin->enableLogging();
 
   auto result = snd_pcm_ioplug_create(plugin, name, stream, mode);

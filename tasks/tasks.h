@@ -54,15 +54,24 @@ public:
     return static_cast<ArtifactImpl<T>*>(artifact_.get())->getData();
   }
 
+  void reset()
+  {
+    if(reset_)
+    {
+      reset_();
+    }
+  }
+
   bool isFinal() const { return dependents_.size() == 0; }
 
   template <typename ArtifactType>
   static std::shared_ptr<Task> create(const std::function<void(Task&)>& callback,
                                       const std::vector<std::shared_ptr<Task>>& dependencies = {},
-                                      ArtifactType&& artifact = ArtifactType())
+                                      ArtifactType&& artifact = ArtifactType(),
+                                      const std::function<void()> reset = {})
   {
-    std::shared_ptr<Task> task{
-        new Task(callback, dependencies, std::make_unique<ArtifactImpl<ArtifactType>>(std::move(artifact)))};
+    std::shared_ptr<Task> task{new Task(
+        callback, dependencies, std::make_unique<ArtifactImpl<ArtifactType>>(std::move(artifact)), reset)};
 
     for(auto& d : dependencies)
     {
@@ -80,12 +89,14 @@ public:
 protected:
   Task(std::function<void(Task&)> task,
        const std::vector<std::shared_ptr<Task>>& dependencies,
-       std::unique_ptr<Artifact> artifact)
+       std::unique_ptr<Artifact> artifact,
+       const std::function<void()>& reset)
       : callback_(std::move(task)),
         dependencies_(dependencies),
         dependenciesLeft_(dependencies.size()),
         dependents_{},
-        artifact_(std::move(artifact))
+        artifact_(std::move(artifact)),
+        reset_(reset)
   {
   }
 
@@ -96,6 +107,7 @@ protected:
   std::atomic<uint32_t> dependenciesLeft_{0};      // Number of dependencies yet to complete
   std::vector<std::shared_ptr<Task>> dependents_;  // Tasks that depend on this one
   std::unique_ptr<Artifact> artifact_{nullptr};
+  std::function<void()> reset_{};
 };
 
 class TaskRunner
@@ -105,7 +117,7 @@ public:
   {
     for(uint32_t i = 0; i < numThreads; ++i)
     {
-      workers_.emplace_back([this] { threadRun(false); });
+      workers_.emplace_back([this] { threadRun(); });
     }
   }
 
@@ -159,7 +171,7 @@ protected:
     cv_.notify_all();
   }
 
-  void threadRun(bool master)
+  void threadRun()
   {
     while(!stop_.load())
     {
