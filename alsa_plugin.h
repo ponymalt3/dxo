@@ -79,7 +79,6 @@ public:
 
       inputOffset_ += segmentSize;
       i += segmentSize;
-      // streamPos_ += segmentSize;
 
       if(inputOffset_ == blockSize_)
       {
@@ -124,7 +123,6 @@ public:
   static snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io);
   static int dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params);
   static int dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp);
-  static int dxo_stop(snd_pcm_ioplug_t* io);
 
 protected:
   uint32_t blockSize_{};
