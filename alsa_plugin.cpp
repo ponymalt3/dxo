@@ -131,7 +131,7 @@ extern "C" {
 snd_pcm_sframes_t AlsaPluginDxO::dxo_pointer(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  return plugin->streamPos_ % plugin->buffer_size;
+  return plugin->streamPos_ % (plugin->buffer_size / 2);
 }
 
 snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
@@ -250,7 +250,6 @@ int AlsaPluginDxO::dxo_close(snd_pcm_ioplug_t* io)
 
   if(plugin->pcm_output_device_)
   {
-    snd_pcm_drain(plugin->pcm_output_device_);
     snd_pcm_close(plugin->pcm_output_device_);
     plugin->pcm_output_device_ = nullptr;
   }
@@ -269,7 +268,7 @@ struct ChannelMap
 
 static const ChannelMap kChannelMaps[] = {{2, {SND_CHMAP_FL, SND_CHMAP_FR, SND_CHMAP_UNKNOWN}},
                                           {3, {SND_CHMAP_FL, SND_CHMAP_FR, SND_CHMAP_LFE}}};
-const int kNumChannelMaps = std::size(kChannelMaps);
+const int32_t kNumChannelMaps = std::size(kChannelMaps);
 
 snd_pcm_chmap_query_t** AlsaPluginDxO::dxo_query_chmaps(snd_pcm_ioplug_t* io)
 {
@@ -358,15 +357,9 @@ int AlsaPluginDxO::dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp)
   return 0;
 }
 
-int AlsaPluginDxO::dxo_stop(snd_pcm_ioplug_t* io)
-{
-  // reinterpret_cast<AlsaPluginDxO*>(io)->crossover_->resetFilterState();
-  return 0;
-}
-
 static const snd_pcm_ioplug_callback_t callbacks = {
     .start = [](snd_pcm_ioplug_t*) { return 0; },
-    .stop = &AlsaPluginDxO::dxo_stop,
+    .stop = [](snd_pcm_ioplug_t*) { return 0; },
     .pointer = &AlsaPluginDxO::dxo_pointer,
     .transfer = &AlsaPluginDxO::dxo_transfer,
     .close = &AlsaPluginDxO::dxo_close,
@@ -478,7 +471,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 16, 2 * 1024 * 1024) < 0)
+  if(snd_pcm_ioplug_set_param_minmax(plugin, SND_PCM_IOPLUG_HW_PERIOD_BYTES, 16 * 1024, 2 * 1024 * 1024) < 0)
   {
     plugin->print("SND_PCM_IOPLUG_HW_PERIOD_BYTES failed");
     return -EINVAL;
