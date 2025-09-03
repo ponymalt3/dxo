@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
-#include <iostream>
 #include <vector>
 
 #include "convolution.h"
@@ -33,9 +32,12 @@ public:
     return result;
   }
 
-  void expectEqual(const std::span<float>& a, const std::span<float>& b)
+  bool equals(const std::span<float>& a, const std::span<float>& b)
   {
-    EXPECT_GT(std::min(a.size(), b.size()), 1);
+    if(std::min(a.size(), b.size()) <= 1)
+    {
+      return false;
+    }
 
     constexpr auto epsilon = 0.04f;
 
@@ -52,9 +54,15 @@ public:
         epsilonScaled = 0.00001f;
       }
 
-      EXPECT_LE(dif, epsilonScaled) << " at " << (i) << "\n  e = " << (epsilonScaled) << "\n  a = " << (a[i])
-                                    << "\n  b = " << (b[i]);
+      if(dif >= epsilonScaled)
+      {
+        // std::cout << " at " << (i) << "\n  e = " << (epsilonScaled) << "\n  a = " << (a[i])
+        //           << "\n  b = " << (b[i]) << std::endl;
+        return false;
+      }
     }
+
+    return true;
   }
 
 protected:
@@ -94,7 +102,7 @@ TEST_F(FirFilterTest, Test_ParallelConvolution)
       }
     }
 
-    expectEqual(result_upc, result_conv);
+    EXPECT_TRUE(equals(result_upc, result_conv));
   }
 }
 
@@ -165,7 +173,7 @@ TEST_F(FirFilterTest, Test_FirMultiChannelCrossover)
   for(auto i{0U}; i < h.size(); ++i)
   {
     auto conv = convolve(h[i], inputs[InputChannelMap[i]]);
-    expectEqual(std::span(conv).subspan(0, BlockSize * NumBlocks),
-                std::span(outputs[i]).subspan(0, BlockSize * NumBlocks));
+    EXPECT_TRUE(equals(std::span(conv).subspan(0, BlockSize * NumBlocks),
+                       std::span(outputs[i]).subspan(0, BlockSize * NumBlocks)));
   }
 }

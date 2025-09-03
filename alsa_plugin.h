@@ -40,6 +40,7 @@ public:
 
   AlsaPluginDxO(const std::string& path,
                 uint32_t blockSize,
+                uint32_t firDelay,
                 const std::string slavePcm,
                 const snd_pcm_ioplug_callback_t* callbacks);
 
@@ -125,6 +126,7 @@ public:
 
 protected:
   uint32_t blockSize_{};
+  uint32_t firDelay_{};
   std::vector<float*> inputs_{nullptr};
   std::vector<float*> outputs_{nullptr};
   uint32_t inputOffset_{0};
