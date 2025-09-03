@@ -193,7 +193,8 @@ public:
           forwardFft->run();
         },
         {},
-        forwardFft->output_.subspan(0));
+        forwardFft->output_.subspan(0),
+        [overlapBuffer, subFilterSize]() { memset(overlapBuffer.get(), 0, sizeof(float) * subFilterSize); });
 
     return {fft, forwardFft->input_.last(inputBlockSize)};
   }

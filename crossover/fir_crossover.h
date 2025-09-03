@@ -70,6 +70,28 @@ public:
     return outputBuffer_[outputChannel];
   }
 
+  void resetFilterState()
+  {
+    for(auto in : inputJobs_)
+    {
+      in->reset();
+    }
+
+    for(auto& c : convolutions_)
+    {
+      c->clearDelayLine();
+    }
+
+    for(auto& in : inputBuffer_)
+    {
+      std::fill(in.begin(), in.end(), 0.0f);
+    }
+
+    // update internal state
+    updateInputs();
+    updateInputs();
+  }
+
 protected:
   TaskRunner runner_;
   std::vector<TaskType> inputJobs_;

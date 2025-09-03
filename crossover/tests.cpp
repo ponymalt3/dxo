@@ -177,3 +177,32 @@ TEST_F(FirFilterTest, Test_FirMultiChannelCrossover)
                        std::span(outputs[i]).subspan(0, BlockSize * NumBlocks)));
   }
 }
+
+TEST_F(FirFilterTest, Test_ResetFilterState)
+{
+  constexpr auto BlockSize = 4U;
+  constexpr auto NumOutputs = 2U;
+  std::vector<float> kZeros(BlockSize, 0.0f);
+
+  std::vector<float> h{0, 1, 2, 3, 4, 5, 6, 7};
+  std::vector<FirMultiChannelCrossover::ConfigType> config{{0, h}, {1, h}};
+  std::vector<std::vector<float>> inputs{{1, 2, 3, 4}, {8, 7, 6, 5}};
+  std::vector<std::vector<float>> outputs(NumOutputs);
+
+  FirMultiChannelCrossover fmcc(BlockSize, inputs.size(), config, 1);
+
+  std::copy(inputs[0].begin(), inputs[0].end(), fmcc.getInputBuffer(0).begin());
+  std::copy(inputs[1].begin(), inputs[1].end(), fmcc.getInputBuffer(1).begin());
+
+  fmcc.updateInputs();
+
+  EXPECT_FALSE(equals(kZeros, fmcc.getOutputBuffer(0)));
+  EXPECT_FALSE(equals(kZeros, fmcc.getOutputBuffer(1)));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+  fmcc.resetFilterState();
+
+  EXPECT_TRUE(equals(kZeros, fmcc.getOutputBuffer(0)));
+  EXPECT_TRUE(equals(kZeros, fmcc.getOutputBuffer(1)));
+}
