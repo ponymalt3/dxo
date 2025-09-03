@@ -105,7 +105,7 @@ public:
   {
     for(uint32_t i = 0; i < numThreads; ++i)
     {
-      workers_.emplace_back([this] { threadRun(false); });
+      workers_.emplace_back([this] { threadRun(); });
     }
   }
 
@@ -159,7 +159,7 @@ protected:
     cv_.notify_all();
   }
 
-  void threadRun(bool master)
+  void threadRun()
   {
     while(!stop_.load())
     {
