@@ -129,7 +129,7 @@ extern "C" {
 snd_pcm_sframes_t AlsaPluginDxO::dxo_pointer(snd_pcm_ioplug_t* io)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  return plugin->streamPos_ % (plugin->buffer_size / 2);
+  return plugin->streamPos_ % plugin->buffer_size;
 }
 
 snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
@@ -138,12 +138,6 @@ snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
                                               snd_pcm_uframes_t size)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-
-  if(!plugin->pcm_output_device_)
-  {
-    plugin->print("Device not opened!");
-    return -EBUSY;
-  }
 
   const auto writer = [plugin](const int16_t* data, uint32_t frames) {
     return plugin->writePcm(data, frames);
@@ -273,7 +267,7 @@ struct ChannelMap
 
 static const ChannelMap kChannelMaps[] = {{2, {SND_CHMAP_FL, SND_CHMAP_FR, SND_CHMAP_UNKNOWN}},
                                           {3, {SND_CHMAP_FL, SND_CHMAP_FR, SND_CHMAP_LFE}}};
-const int kNumChannelMaps = std::size(kChannelMaps);
+const int32_t kNumChannelMaps = std::size(kChannelMaps);
 
 snd_pcm_chmap_query_t** AlsaPluginDxO::dxo_query_chmaps(snd_pcm_ioplug_t* io)
 {
@@ -347,17 +341,17 @@ int AlsaPluginDxO::dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* para
 int AlsaPluginDxO::dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
-  plugin->print("dxo_delay");
 
-  snd_pcm_sframes_t slave_delay{0};
-  const auto result = snd_pcm_delay(plugin->pcm_output_device_, &slave_delay);
+  snd_pcm_sframes_t slaveDelay{0};
+  const auto result = snd_pcm_delay(plugin->pcm_output_device_, &slaveDelay);
   if(result < 0)
   {
     plugin->print("snd_pcm_delay failed!");
     return result;
   }
 
-  *delayp = slave_delay + plugin->inputOffset_;
+  const auto convDelay = plugin->blockSize_ - plugin->inputOffset_;
+  *delayp = slaveDelay + convDelay;
   return 0;
 }
 
