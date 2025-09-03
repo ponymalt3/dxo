@@ -28,7 +28,7 @@ public:
     return result;
   }
 
-  AlsaPluginDxO plugin{"coeffs_reduced.m", 256, "", nullptr};
+  AlsaPluginDxO plugin{"coeffs_reduced.m", 256, 0, "", nullptr};
   std::vector<std::unique_ptr<unsigned char[]>> mem_;
 };
 
