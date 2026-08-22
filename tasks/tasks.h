@@ -157,7 +157,6 @@ public:
 
     if(finalTask_ && wait)
     {
-      // threadRun(true);
       finalTaskReady_.acquire();
       finalTask_->execute(nullptr);
       finalTask_ = nullptr;

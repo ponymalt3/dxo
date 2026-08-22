@@ -279,11 +279,6 @@ public:
   void clearDelayLine() { memset(delayLine_, 0, blockSize_ * numBlocks_ * sizeof(delayLine_[0])); }
 
 protected:
-  static uint32_t getSubFilterSize(uint32_t inputBlockSize)
-  {
-    return (1 << static_cast<uint32_t>(std::ceil(std::log2(inputBlockSize) + 1))) - inputBlockSize;
-  }
-
   void transformFilterCoeffs(const std::span<const float> h)
   {
     ForwardFFT fft{fftSize_};

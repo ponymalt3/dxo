@@ -23,7 +23,8 @@ public:
   enum
   {
     kNumOutputChannels = 8,
-    kScaleS16LE = 32767,
+    kScaleS16LE = (1 << 15) - 1,
+    kScaleS32LE = static_cast<int32_t>((1LL << 31) - 1),
     kChFL = 0,
     kChFR = 3,
     kChRL = 1,
@@ -33,6 +34,7 @@ public:
     kChLFE = 6,
     kChUnknown = 0
   };
+
   static constexpr std::array<uint32_t, 20> kMapAlsaChannel{
       kChUnknown, kChUnknown, kChUnknown, kChFL,      kChFR,      kChRL,     kChRR,
       kChUnknown, kChLFE,     kChSL,      kChSR,      kChUnknown, kChSL,     kChSR,
