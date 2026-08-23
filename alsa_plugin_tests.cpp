@@ -28,19 +28,47 @@ public:
     return result;
   }
 
-  AlsaPluginDxO plugin{"coeffs_reduced.m", 256, 0, "", nullptr};
+  AlsaPluginDxO plugin{"coeffs_reduced.m", 256, 0, false, "", nullptr};
   std::vector<std::unique_ptr<unsigned char[]>> mem_;
 };
 
 TEST_F(AlsaPluginTest, Test_LoadCoefficents)
 {
-  auto coeffs = plugin.loadFIRCoeffs("coeffs.m", 123.456f);
+  auto coeffs = plugin.loadFIRCoeffs("coeffs.m", 123.456f, false);
   ASSERT_EQ(coeffs.size(), 7);
 
-  for(auto& filter : coeffs)
+  const float kSumAbs[] = {0.9f, 1.1f, 2.75f, 1.0f, 1.0f, 1.0f, 1.0f};
+
+  for(size_t i = 0; i < coeffs.size(); ++i)
   {
-    EXPECT_EQ(4096, filter.size());
-    EXPECT_EQ(filter[0], 123.456f);
+    EXPECT_EQ(1024, coeffs[i].size());
+
+    float sum = 0.0f;
+    for(auto c : coeffs[i])
+    {
+      sum += std::abs(c);
+    }
+
+    EXPECT_NEAR(sum, kSumAbs[i] * 123.456f, 0.05f);
+  }
+}
+
+TEST_F(AlsaPluginTest, Test_LoadCoefficentsNormalized)
+{
+  auto coeffs = plugin.loadFIRCoeffs("coeffs.m", 123.456f, true);
+  ASSERT_EQ(coeffs.size(), 7);
+
+  const float kSumAbs[] = {0.9f, 1.1f, 2.75f, 1.0f, 1.0f, 1.0f, 1.0f};
+
+  for(size_t i = 0; i < coeffs.size(); ++i)
+  {
+    float sum = 0.0f;
+    for(auto c : coeffs[i])
+    {
+      sum += std::abs(c);
+    }
+
+    EXPECT_NEAR(sum, kSumAbs[i] / 2.75f * 123.456f, 0.05f);
   }
 }
 
