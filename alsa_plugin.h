@@ -6,6 +6,8 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cmath>
+#include <format>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -43,17 +45,32 @@ public:
   AlsaPluginDxO(const std::string& path,
                 uint32_t blockSize,
                 uint32_t firDelay,
+                bool normalize,
                 const std::string slavePcm,
                 const snd_pcm_ioplug_callback_t* callbacks);
 
-  std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path, float scale);
+  std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path,
+                                                float outputFormatScaling,
+                                                bool normalize);
   void enableLogging();
   bool writePcm(const int16_t* data, const uint32_t frames);
+
+  int closeSlave(int error);
+
+  int openSlave();
+
+  bool configureSlaveHwParams(snd_pcm_hw_params_t* params);
+
+  bool verifySlaveParams(snd_pcm_hw_params_t* params);
+
+  bool configureSlaveTiming(snd_pcm_hw_params_t* params);
+
+  bool readSlaveChannelMap();
 
   template <typename... Args>
   void print(Args... args)
   {
-    (logging_ << ... << args) << "\n";
+    (logging_ << ... << args) << std::endl;
   }
 
   template <typename _InputSampleType, typename _LambdaType>
@@ -118,7 +135,6 @@ public:
                                         const snd_pcm_channel_area_t* src_areas,
                                         snd_pcm_uframes_t src_offset,
                                         snd_pcm_uframes_t size);
-  static int dxo_try_open_device(AlsaPluginDxO* plugin);
   static int dxo_prepare(snd_pcm_ioplug_t* io);
   static int dxo_close(snd_pcm_ioplug_t* io);
   static snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io);
@@ -135,9 +151,10 @@ protected:
   std::ofstream logging_{};
   std::unique_ptr<FirMultiChannelCrossover> crossover_;
   snd_pcm_t* pcm_output_device_{nullptr};
+  int pollFd_{-1};
   std::string pcmName_{};
   std::atomic<uint32_t> streamPos_{0};
-  std::unique_ptr<int16_t> outputBuffer_;
+  std::unique_ptr<int16_t[]> outputBuffer_;
   std::array<uint32_t, 8> channelMap_{kChFL, kChFR, kChRL, kChRR, kChUnknown, kChLFE, kChSL, kChSR};
   double totalTime_{0};
   uint32_t totalBlocks_{0};

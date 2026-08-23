@@ -3,10 +3,14 @@
 
 #include <alsa/asoundlib.h>
 #include <alsa/pcm_external.h>
+#include <poll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 
 AlsaPluginDxO::AlsaPluginDxO(const std::string& path,
                              uint32_t blockSize,
                              uint32_t firDelay,
+                             bool normalize,
                              const std::string slavePcm,
                              const snd_pcm_ioplug_callback_t* callbacks)
     : blockSize_(blockSize),
@@ -25,7 +29,13 @@ AlsaPluginDxO::AlsaPluginDxO(const std::string& path,
   snd_pcm_ioplug_t::private_data = this;
   snd_pcm_ioplug_t::callback = callbacks;
 
-  auto coeffs = loadFIRCoeffs(path, kScaleS16LE);
+  pollFd_ = eventfd(1, EFD_CLOEXEC | EFD_NONBLOCK);
+  snd_pcm_ioplug_t::poll_fd = pollFd_;
+  snd_pcm_ioplug_t::poll_events = POLLIN;
+
+  enableLogging();
+
+  auto coeffs = loadFIRCoeffs(path, kScaleS16LE, normalize);
   assert(coeffs.size() == 7 && "Coeffs file need to provide 7 FIR transfer functions");
 
   std::vector<FirMultiChannelCrossover::ConfigType> config{{0, coeffs[0]},
@@ -49,7 +59,9 @@ AlsaPluginDxO::AlsaPluginDxO(const std::string& path,
   }
 }
 
-std::vector<std::vector<float>> AlsaPluginDxO::loadFIRCoeffs(const std::string& path, float scale)
+std::vector<std::vector<float>> AlsaPluginDxO::loadFIRCoeffs(const std::string& path,
+                                                             float outputFormatScaling,
+                                                             bool normalize)
 {
   std::ifstream file(path);
 
@@ -81,13 +93,46 @@ std::vector<std::vector<float>> AlsaPluginDxO::loadFIRCoeffs(const std::string& 
       {
         double value = 0;
         iss >> value;
-        coeffs.push_back(static_cast<float>(value) * scale);
+        coeffs.push_back(static_cast<float>(value));
       }
 
       if(coeffs.size() > 0)
       {
         filters.push_back(coeffs);
       }
+    }
+  }
+
+  float maxL1 = 0.0f;
+  for(const auto& filter : filters)
+  {
+    float l1 = 0.0f;
+    for(auto coeff : filter)
+    {
+      l1 += std::abs(coeff);
+    }
+
+    maxL1 = std::max(maxL1, l1);
+  }
+
+  float gain = outputFormatScaling;
+
+  // need to reduce gain to prevent clipping of output sample
+  if(normalize && maxL1 > 1.0f)
+  {
+    gain /= maxL1;
+
+    print(std::format("normalizing all filters by {:.4f} ({:.2f} dB), worst sum|h| was {:.4f}",
+                      1.0f / maxL1,
+                      20.0 * std::log10(1.0f / maxL1),
+                      maxL1));
+  }
+
+  for(auto& filter : filters)
+  {
+    for(auto& coeff : filter)
+    {
+      coeff *= gain;
     }
   }
 
@@ -103,24 +148,47 @@ void AlsaPluginDxO::enableLogging()
 #endif
 }
 
+int AlsaPluginDxO::closeSlave(int error)
+{
+  if(pcm_output_device_)
+  {
+    snd_pcm_close(pcm_output_device_);
+    pcm_output_device_ = nullptr;
+  }
+
+  return error;
+}
+
 bool AlsaPluginDxO::writePcm(const int16_t* data, const uint32_t frames)
 {
-  auto result = snd_pcm_writei(pcm_output_device_, data, frames);
-
-  if(result != frames)
+  if(!pcm_output_device_)
   {
+    return false;
+  }
+
+  uint32_t written = 0;
+  while(written < frames)
+  {
+    const auto result =
+        snd_pcm_writei(pcm_output_device_, data + written * kNumOutputChannels, frames - written);
+
     if(result < 0)
     {
       print("write error [", snd_strerror(result), "]");
+      const auto recovered = snd_pcm_recover(pcm_output_device_, result, 1);
+      if(recovered < 0)
+      {
+        print("snd_pcm_recover failed [", snd_strerror(recovered), "]");
+      }
+      return false;
     }
-    else
+
+    if(result == 0)
     {
-      print("incomplete write ", result, "/", frames);
+      return false;
     }
 
-    snd_pcm_recover(pcm_output_device_, result, 0);
-
-    return false;
+    written += result;
   }
 
   return true;
@@ -159,20 +227,139 @@ snd_pcm_sframes_t AlsaPluginDxO::dxo_transfer(snd_pcm_ioplug_t* io,
   return size;
 }
 
-int AlsaPluginDxO::dxo_try_open_device(AlsaPluginDxO* plugin)
+bool AlsaPluginDxO::verifySlaveParams(snd_pcm_hw_params_t* params)
 {
-  if(plugin->pcm_output_device_)
+  uint32_t slaveRate{0};
+  uint32_t slaveChannels{0};
+  snd_pcm_uframes_t slavePeriod{0};
+  snd_pcm_uframes_t slaveBufferSize{0};
+
+  snd_pcm_hw_params_get_rate(params, &slaveRate, nullptr);
+  snd_pcm_hw_params_get_channels(params, &slaveChannels);
+  snd_pcm_hw_params_get_period_size(params, &slavePeriod, nullptr);
+  snd_pcm_hw_params_get_buffer_size(params, &slaveBufferSize);
+
+  print(std::format("slave '{}': rate={} channels={} period={} buffer={}",
+                    pcmName_,
+                    slaveRate,
+                    slaveChannels,
+                    slavePeriod,
+                    slaveBufferSize));
+
+  return slaveChannels == kNumOutputChannels;
+}
+
+bool AlsaPluginDxO::configureSlaveTiming(snd_pcm_hw_params_t* params)
+{
+  snd_pcm_uframes_t period{0};
+  snd_pcm_uframes_t buffer{0};
+  snd_pcm_hw_params_get_period_size(params, &period, nullptr);
+  snd_pcm_hw_params_get_buffer_size(params, &buffer);
+
+  snd_pcm_sw_params_t* swParams{nullptr};
+  snd_pcm_sw_params_alloca(&swParams);
+
+  if(snd_pcm_sw_params_current(pcm_output_device_, swParams) >= 0)
+  {
+    snd_pcm_sw_params_set_start_threshold(pcm_output_device_, swParams, buffer);
+    snd_pcm_sw_params_set_avail_min(pcm_output_device_, swParams, period);
+
+    if(snd_pcm_sw_params(pcm_output_device_, swParams) < 0)
+    {
+      print("snd_pcm_sw_params failed");
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool AlsaPluginDxO::configureSlaveHwParams(snd_pcm_hw_params_t* params)
+{
+  if(snd_pcm_hw_params_set_access(pcm_output_device_, params, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
+  {
+    print("snd_pcm_hw_params_set_access failed");
+    return false;
+  }
+
+  if(snd_pcm_hw_params_set_format(pcm_output_device_, params, SND_PCM_FORMAT_S16_LE) < 0)
+  {
+    print("snd_pcm_hw_params_set_format failed");
+    return false;
+  }
+
+  if(snd_pcm_hw_params_set_channels(pcm_output_device_, params, kNumOutputChannels) < 0)
+  {
+    print("snd_pcm_hw_params_set_channels failed");
+    return false;
+  }
+
+  uint32_t slaveRate = rate;
+  if(snd_pcm_hw_params_set_rate_near(pcm_output_device_, params, &slaveRate, 0) < 0)
+  {
+    print("snd_pcm_hw_params_set_rate_near failed");
+  }
+
+  snd_pcm_uframes_t periodSize = blockSize_;
+  if(snd_pcm_hw_params_set_period_size_near(pcm_output_device_, params, &periodSize, nullptr) < 0)
+  {
+    print("snd_pcm_hw_params_set_period_size_near failed");
+  }
+
+  // if slave buffer size is specified use it otherwise take the buffer size of plugin
+  snd_pcm_uframes_t bufferSize = buffer_size;
+
+  if(snd_pcm_hw_params_set_buffer_size_near(pcm_output_device_, params, &bufferSize) < 0)
+  {
+    print("snd_pcm_hw_params_set_buffer_size_near failed");
+  }
+
+  if(snd_pcm_hw_params(pcm_output_device_, params) < 0)
+  {
+    print("snd_pcm_hw_params failed");
+    return false;
+  }
+
+  return true;
+}
+
+bool AlsaPluginDxO::readSlaveChannelMap()
+{
+  auto chMap = snd_pcm_get_chmap(pcm_output_device_);
+
+  if(chMap == nullptr)
+  {
+    return false;
+  }
+
+  const auto numChannels = std::min<uint32_t>(chMap->channels, channelMap_.size());
+
+  for(auto i{0U}; i < numChannels; ++i)
+  {
+    const auto pos = chMap->pos[i];
+    channelMap_[i] =
+        (pos < kMapAlsaChannel.size()) ? kMapAlsaChannel[pos] : static_cast<uint32_t>(kChUnknown);
+    print("CHMAP[", i, "]: ", pos, "  -> ", channelMap_[i]);
+  }
+
+  free(chMap);
+
+  return true;
+}
+
+int AlsaPluginDxO::openSlave()
+{
+  if(pcm_output_device_)
   {
     return 0;
   }
 
-  const auto result =
-      snd_pcm_open(&(plugin->pcm_output_device_), plugin->pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0);
+  const auto result = snd_pcm_open(&(pcm_output_device_), pcmName_.c_str(), SND_PCM_STREAM_PLAYBACK, 0);
 
   if(result < 0)
   {
-    plugin->pcm_output_device_ = nullptr;
-    plugin->print("snd_pcm_open failed ", snd_strerror(result));
+    pcm_output_device_ = nullptr;
+    print("snd_pcm_open failed ", snd_strerror(result));
     return -EBUSY;
   }
 
@@ -180,54 +367,23 @@ int AlsaPluginDxO::dxo_try_open_device(AlsaPluginDxO* plugin)
   snd_pcm_hw_params_alloca(&params);
   memset(params, 0, snd_pcm_hw_params_sizeof());
 
-  snd_pcm_hw_params_any(plugin->pcm_output_device_, params);
-  // snd_pcm_hw_params_dump(params, plugin->output_);
+  snd_pcm_hw_params_any(pcm_output_device_, params);
+  // snd_pcm_hw_params_dump(params, output_);
 
-  if(snd_pcm_hw_params_set_access(plugin->pcm_output_device_, params, SND_PCM_ACCESS_RW_INTERLEAVED) < 0)
+  if(!configureSlaveHwParams(params))
   {
-    plugin->print("snd_pcm_hw_params_set_access failed");
+    return closeSlave(-EINVAL);
   }
 
-  if(snd_pcm_hw_params_set_format(plugin->pcm_output_device_, params, SND_PCM_FORMAT_S16_LE) < 0)
+  if(!verifySlaveParams(params))
   {
-    plugin->print("snd_pcm_hw_params_set_format failed");
+    print(std::format("slave did not accept {} channels", static_cast<uint32_t>(kNumOutputChannels)));
+    return closeSlave(-EINVAL);
   }
 
-  if(snd_pcm_hw_params_set_channels(plugin->pcm_output_device_, params, AlsaPluginDxO::kNumOutputChannels) <
-     0)
-  {
-    plugin->print("snd_pcm_hw_params_set_channels failed");
-  }
+  configureSlaveTiming(params);
 
-  uint32_t rate = plugin->rate;
-  if(snd_pcm_hw_params_set_rate_near(plugin->pcm_output_device_, params, &rate, 0) < 0)
-  {
-    plugin->print("snd_pcm_hw_params_set_rate_near failed");
-  }
-
-  if(snd_pcm_hw_params_set_period_size(plugin->pcm_output_device_, params, plugin->blockSize_, 0) < 0)
-  {
-    plugin->print("snd_pcm_hw_params_set_period_size failed");
-  }
-
-  if(snd_pcm_hw_params(plugin->pcm_output_device_, params) < 0)
-  {
-    plugin->print("snd_pcm_hw_params failed");
-    snd_pcm_close(plugin->pcm_output_device_);
-    plugin->pcm_output_device_ = nullptr;
-    return -EINVAL;
-  }
-
-  auto chMap = snd_pcm_get_chmap(plugin->pcm_output_device_);
-
-  if(chMap)
-  {
-    for(auto i{0}; i < chMap[0].channels; ++i)
-    {
-      plugin->channelMap_[i] = kMapAlsaChannel[chMap[0].pos[i]];
-      plugin->print("CHMAP[", i, "]: ", chMap[0].pos[i], "  -> ", plugin->channelMap_[i]);
-    }
-  }
+  readSlaveChannelMap();
 
   return 0;
 }
@@ -238,6 +394,20 @@ int AlsaPluginDxO::dxo_prepare(snd_pcm_ioplug_t* io)
   plugin->print("dxo_prepare");
   plugin->streamPos_ = 0;
   plugin->inputOffset_ = 0;
+  if(plugin->pcm_output_device_)
+  {
+    const auto state = snd_pcm_state(plugin->pcm_output_device_);
+
+    if(state == SND_PCM_STATE_XRUN || state == SND_PCM_STATE_SUSPENDED)
+    {
+      const auto result = snd_pcm_prepare(plugin->pcm_output_device_);
+      if(result < 0)
+      {
+        plugin->print("slave prepare failed [", snd_strerror(result), "]");
+      }
+    }
+  }
+
   return 0;
 }
 
@@ -246,13 +416,22 @@ int AlsaPluginDxO::dxo_close(snd_pcm_ioplug_t* io)
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
 
   plugin->print("dxo_close");
-  plugin->print("avg time: ", plugin->totalTime_ / plugin->totalBlocks_);
+  plugin->print("avg time: ",
+                plugin->totalBlocks_ > 0 ? plugin->totalTime_ / plugin->totalBlocks_ : 0.0,
+                " over ",
+                plugin->totalBlocks_,
+                " blocks");
 
   if(plugin->pcm_output_device_)
   {
     snd_pcm_drain(plugin->pcm_output_device_);
-    snd_pcm_close(plugin->pcm_output_device_);
-    plugin->pcm_output_device_ = nullptr;
+    plugin->closeSlave(0);
+  }
+
+  if(plugin->pollFd_ >= 0)
+  {
+    close(plugin->pollFd_);
+    plugin->pollFd_ = -1;
   }
 
   delete plugin;
@@ -337,22 +516,29 @@ int AlsaPluginDxO::dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* para
   snd_pcm_hw_params_get_buffer_size(params, &plugin->buffer_size);
   snd_pcm_hw_params_get_access(params, &plugin->access);
 
-  return dxo_try_open_device(plugin);
+  return plugin->openSlave();
 }
 
 int AlsaPluginDxO::dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp)
 {
   auto* plugin = reinterpret_cast<AlsaPluginDxO*>(io);
 
+  const auto convDelay = plugin->blockSize_ - plugin->inputOffset_;
+
+  if(!plugin->pcm_output_device_)
+  {
+    *delayp = plugin->firDelay_ + convDelay;
+    return 0;
+  }
+
   snd_pcm_sframes_t slaveDelay{0};
   const auto result = snd_pcm_delay(plugin->pcm_output_device_, &slaveDelay);
   if(result < 0)
   {
-    plugin->print("snd_pcm_delay failed!");
+    plugin->print("snd_pcm_delay failed [", snd_strerror(result), "]");
     return result;
   }
 
-  const auto convDelay = plugin->blockSize_ - plugin->inputOffset_;
   *delayp = slaveDelay + plugin->firDelay_ + convDelay;
   return 0;
 }
@@ -376,6 +562,7 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
 {
   long int blockSize = 128;
   long int firDelay = 0;  // ignore fir delay by default
+  long int normalize = 1;
   std::string coeffPath;
   std::string slavePcm;
   snd_config_t* slaveConfig = nullptr;
@@ -422,6 +609,12 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
       continue;
     }
 
+    if(param == "normalize")
+    {
+      snd_config_get_integer(config, &normalize);
+      continue;
+    }
+
     if(param == "path")
     {
       const char* path;
@@ -436,8 +629,8 @@ SND_PCM_PLUGIN_DEFINE_FUNC(dxo)
     return -EINVAL;
   }
 
-  AlsaPluginDxO* plugin = new AlsaPluginDxO(coeffPath, blockSize, firDelay, slavePcm, &callbacks);
-  plugin->enableLogging();
+  AlsaPluginDxO* plugin =
+      new AlsaPluginDxO(coeffPath, blockSize, firDelay, normalize != 0, slavePcm, &callbacks);
 
   auto result = snd_pcm_ioplug_create(plugin, name, stream, mode);
 
