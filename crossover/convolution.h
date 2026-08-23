@@ -182,7 +182,10 @@ public:
   {
     auto subFilterSize = inputBlockSize;
     auto forwardFft = std::make_shared<ForwardFFT>(inputBlockSize + subFilterSize);
-    auto overlapBuffer = std::shared_ptr<float>(new(std::align_val_t(64)) float[subFilterSize]);  // align mem
+    auto overlapBuffer = std::shared_ptr<float>(new(std::align_val_t(64)) float[subFilterSize],
+                                                [](float* p) {
+                                                  operator delete[](p, std::align_val_t(64));
+                                                });
     memset(overlapBuffer.get(), 0, sizeof(float) * subFilterSize);
 
     auto fft = Task::create<ComplexData>(
@@ -245,11 +248,8 @@ public:
       combine = Task::create<ComplexData>(
           [this](Task& task) {
             auto result = task.getArtifact<ComplexData>().data();
-            for(auto& _ : std::span(H_, blockSize_))
-            {
-              multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
-              add(result, result, task.getDependencies()[1]->getArtifact<ComplexVec>().data(), blockSize_);
-            }
+            multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
+            add(result, result, task.getDependencies()[1]->getArtifact<ComplexVec>().data(), blockSize_);
           },
           {input, sumUpTasks.front()},
           inverseFft_.input_.subspan(0));
@@ -260,10 +260,7 @@ public:
       combine = Task::create<ComplexData>(
           [this](Task& task) {
             auto result = task.getArtifact<ComplexData>().data();
-            for(auto& _ : std::span(H_, blockSize_))
-            {
-              multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
-            }
+            multiply(result, H_, task.getDependencies()[0]->getArtifact<ComplexData>().data(), blockSize_);
           },
           {input},
           inverseFft_.input_.subspan(0));
