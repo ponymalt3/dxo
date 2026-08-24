@@ -278,7 +278,7 @@ public:
 protected:
   void transformFilterCoeffs(const std::span<const float> h)
   {
-    ForwardFFT fft{fftSize_};
+    ForwardFFT fft{fftSize_, false};
 
     const float* src = h.data();
     std::complex<float>* dst = H_;
