@@ -1,4 +1,5 @@
 #pragma once
+
 #include <atomic>
 #include <memory>
 
@@ -16,14 +17,14 @@ public:
 
     do
     {
-      currentHead = head_.load(std::memory_order_relaxed);
+      currentHead = head_.load(std::memory_order_acquire);
 
       if(currentHead == nullptr)
       {
         return nullptr;
       }
     } while(!head_.compare_exchange_weak(
-        currentHead, currentHead->next_, std::memory_order_release, std::memory_order_relaxed));
+        currentHead, currentHead->next_, std::memory_order_relaxed, std::memory_order_relaxed));
 
     return currentHead;
   }
