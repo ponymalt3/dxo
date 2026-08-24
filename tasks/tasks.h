@@ -32,18 +32,17 @@ class Task : public std::enable_shared_from_this<Task>, public ThreadSafeList::N
 public:
   void execute(const std::function<void(std::shared_ptr<Task>)>& dep_resolved)
   {
+    dependenciesLeft_.store(dependencies_.size(), std::memory_order_relaxed);
+
     callback_(*this);  // Execute the task
 
     for(auto& d : dependents_)
     {
-      if(--(d->dependenciesLeft_) == 0)
+      if(d->dependenciesLeft_.fetch_sub(1, std::memory_order_acq_rel) == 1)
       {
         dep_resolved(d);
       }
     }
-
-    // reset dependencies count
-    dependenciesLeft_ = dependencies_.size();
   }
 
   const std::vector<std::shared_ptr<Task>>& getDependencies() const { return dependencies_; }
@@ -123,8 +122,11 @@ public:
 
   ~TaskRunner()
   {
-    stop_.store(true);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    {
+      std::lock_guard lock(mutex_);
+      stop_ = true;
+    }
+
     cv_.notify_all();
 
     for(auto& worker : workers_)
@@ -157,7 +159,6 @@ public:
 
     if(finalTask_ && wait)
     {
-      // threadRun(true);
       finalTaskReady_.acquire();
       finalTask_->execute(nullptr);
       finalTask_ = nullptr;
@@ -167,7 +168,11 @@ public:
 protected:
   void restartWorker()
   {
-    ++epoch_;
+    {
+      std::lock_guard lock(mutex_);
+      ++epoch_;
+    }
+
     cv_.notify_all();
   }
 
