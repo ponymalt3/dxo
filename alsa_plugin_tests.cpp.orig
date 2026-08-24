@@ -28,7 +28,11 @@ public:
     return result;
   }
 
+<<<<<<< HEAD
+  AlsaPluginDxO plugin{"coeffs_reduced.m", 256, 0, "", nullptr};
+=======
   AlsaPluginDxO plugin{"coeffs_reduced.m", 256, 0, false, "", nullptr};
+>>>>>>> rework
   std::vector<std::unique_ptr<unsigned char[]>> mem_;
 };
 

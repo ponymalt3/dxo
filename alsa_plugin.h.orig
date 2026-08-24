@@ -45,7 +45,10 @@ public:
   AlsaPluginDxO(const std::string& path,
                 uint32_t blockSize,
                 uint32_t firDelay,
+<<<<<<< HEAD
+=======
                 bool normalize,
+>>>>>>> rework
                 const std::string slavePcm,
                 const snd_pcm_ioplug_callback_t* callbacks);
 

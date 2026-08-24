@@ -50,7 +50,7 @@ public:
     runner_.run(backgroundJobs_, false);
   }
 
-  ~FirMultiChannelCrossover() { fftwf_cleanup(); }
+  ~FirMultiChannelCrossover() = default;
 
   void updateInputs()
   {
@@ -93,10 +93,10 @@ public:
   }
 
 protected:
-  TaskRunner runner_;
   std::vector<TaskType> inputJobs_;
   std::vector<TaskType> backgroundJobs_;
   std::vector<RealData> inputBuffer_;
   std::vector<RealData> outputBuffer_;
   std::list<std::unique_ptr<Convolution>> convolutions_;
+  TaskRunner runner_;
 };
