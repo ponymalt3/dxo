@@ -5,9 +5,14 @@
 #include "alsa_plugin.h"
 #include "pcm_stream.h"
 
-class AlsaPluginTest : public testing::Test
+class AlsaPluginTest : public testing::Test, public AlsaPluginDxO
 {
 public:
+  AlsaPluginTest() : AlsaPluginDxO(256, 0, "", nullptr)
+  {
+    initialize("coeffs_reduced.m", false);
+  }
+
   static void SetUpTestSuite()
   {
     std::filesystem::current_path(std::filesystem::current_path().parent_path() / "rpi_digital_crossover");
@@ -28,13 +33,12 @@ public:
     return result;
   }
 
-  AlsaPluginDxO plugin{"coeffs_reduced.m", 256, 0, false, "", nullptr};
   std::vector<std::unique_ptr<unsigned char[]>> mem_;
 };
 
 TEST_F(AlsaPluginTest, Test_LoadCoefficents)
 {
-  auto coeffs = plugin.loadFIRCoeffs("coeffs.m", 123.456f, false);
+  auto coeffs = loadFIRCoeffs("coeffs.m", 123.456f, false);
   ASSERT_EQ(coeffs.size(), 7);
 
   const float kSumAbs[] = {0.9f, 1.1f, 2.75f, 1.0f, 1.0f, 1.0f, 1.0f};
@@ -55,7 +59,7 @@ TEST_F(AlsaPluginTest, Test_LoadCoefficents)
 
 TEST_F(AlsaPluginTest, Test_LoadCoefficentsNormalized)
 {
-  auto coeffs = plugin.loadFIRCoeffs("coeffs.m", 123.456f, true);
+  auto coeffs = loadFIRCoeffs("coeffs.m", 123.456f, true);
   ASSERT_EQ(coeffs.size(), 7);
 
   const float kSumAbs[] = {0.9f, 1.1f, 2.75f, 1.0f, 1.0f, 1.0f, 1.0f};
@@ -101,5 +105,5 @@ TEST_F(AlsaPluginTest, Test_PluginUpdate)
     }
   };
 
-  plugin.update(stream, kFrames, false, test_writer);
+  update(stream, kFrames, false, test_writer);
 }

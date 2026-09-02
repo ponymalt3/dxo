@@ -25,6 +25,7 @@ public:
   enum
   {
     kNumOutputChannels = 8,
+    kNumFilters = 7,
     kScaleS16LE = (1 << 15) - 1,
     kScaleS32LE = static_cast<int32_t>((1LL << 31) - 1),
     kChFL = 0,
@@ -42,36 +43,49 @@ public:
       kChUnknown, kChLFE,     kChSL,      kChSR,      kChUnknown, kChSL,     kChSR,
       kChSL,      kChSR,      kChUnknown, kChUnknown, kChUnknown, kChUnknown};
 
-  AlsaPluginDxO(const std::string& path,
-                uint32_t blockSize,
+  AlsaPluginDxO(uint32_t blockSize,
                 uint32_t firDelay,
-                bool normalize,
                 const std::string slavePcm,
                 const snd_pcm_ioplug_callback_t* callbacks);
 
-  std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path,
-                                                float outputFormatScaling,
-                                                bool normalize);
-  void enableLogging();
-  bool writePcm(const int16_t* data, const uint32_t frames);
-
-  int closeSlave(int error);
-
-  int openSlave();
-
-  bool configureSlaveHwParams(snd_pcm_hw_params_t* params);
-
-  bool verifySlaveParams(snd_pcm_hw_params_t* params);
-
-  bool configureSlaveTiming(snd_pcm_hw_params_t* params);
-
-  bool readSlaveChannelMap();
+  bool initialize(const std::string& path, bool normalize);
 
   template <typename... Args>
   void print(Args... args)
   {
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+
+    logging_ << std::format("{:%F %T} ", now);
     (logging_ << ... << args) << std::endl;
   }
+
+  // ALSA ioplug functions
+  static snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io);
+  static snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* io,
+                                        const snd_pcm_channel_area_t* src_areas,
+                                        snd_pcm_uframes_t src_offset,
+                                        snd_pcm_uframes_t size);
+  static int dxo_prepare(snd_pcm_ioplug_t* io);
+  static int dxo_close(snd_pcm_ioplug_t* io);
+  static snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io);
+  static snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io);
+  static int dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params);
+  static int dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp);
+
+protected:
+  std::vector<std::vector<float>> loadFIRCoeffs(const std::string& path,
+                                                float outputFormatScaling,
+                                                bool normalize);
+  void enableLogging();
+
+  int openPcm();
+  int closePcm(int error);
+  bool writePcm(const int16_t* data, const uint32_t frames);
+
+  bool configureHwParams(snd_pcm_hw_params_t* params);
+  bool configureTiming(snd_pcm_hw_params_t* params);
+  bool verifyParams(snd_pcm_hw_params_t* params);
+  bool updateChannelMap();
 
   template <typename _InputSampleType, typename _LambdaType>
   uint32_t update(PcmStream<_InputSampleType>& src, uint32_t size, bool hasLFE, _LambdaType writer)
@@ -129,20 +143,6 @@ public:
     return 0;
   }
 
-  // ALSA ioplug functions
-  static snd_pcm_sframes_t dxo_pointer(snd_pcm_ioplug_t* io);
-  static snd_pcm_sframes_t dxo_transfer(snd_pcm_ioplug_t* io,
-                                        const snd_pcm_channel_area_t* src_areas,
-                                        snd_pcm_uframes_t src_offset,
-                                        snd_pcm_uframes_t size);
-  static int dxo_prepare(snd_pcm_ioplug_t* io);
-  static int dxo_close(snd_pcm_ioplug_t* io);
-  static snd_pcm_chmap_query_t** dxo_query_chmaps(snd_pcm_ioplug_t* io);
-  static snd_pcm_chmap_t* dxo_get_chmap(snd_pcm_ioplug_t* io);
-  static int dxo_hw_params(snd_pcm_ioplug_t* io, snd_pcm_hw_params_t* params);
-  static int dxo_delay(snd_pcm_ioplug_t* io, snd_pcm_sframes_t* delayp);
-
-protected:
   uint32_t blockSize_{};
   uint32_t firDelay_{};
   std::vector<float*> inputs_{nullptr};
